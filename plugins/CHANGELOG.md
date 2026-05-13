@@ -1,3 +1,11 @@
+## 1.6.0 (Unreleased)
+
+### 🚀 Features
+
+- **plugin-types**: Added `waitForLayoutUpdate` to wait until pending layout updates have finished
+- **plugin-types**: Added `waitForLayoutUpdate` to the `Shape` interface to wait until a single shape's pending layout updates have finished
+
+
 ## 1.5.0 (Unreleased)
 
 ### 💣 Breaking changes & Deprecations
