@@ -340,8 +340,8 @@
       [:span {:class (stl/css :command-name)}
        command-translate]
       [:div {:class (stl/css :shortcut-actions)}
-       (if (and customized? (str/blank? command))
-         [:> icon* {:icon-id i/detach
+       (if (and customized? (str/blank? content))
+         [:> icon* {:icon-id i/broken-link
                     :size "s"
                     :class (stl/css :shortcut-detach-icon)}]
 
@@ -422,9 +422,14 @@
             [:span {:class (stl/css :command-name)}
              command-translate]
             [:div {:class (stl/css :shortcut-actions)}
-             [:> shortcuts-keys* {:content content
-                                  :command command
-                                  :is-customized customized?}]]])))]))
+             (if (and customized? (str/blank? content))
+               [:> icon* {:icon-id i/broken-link
+                          :aria-label "Not assigned shortcut"
+                          :size "s"
+                          :class (stl/css :shortcut-detach-icon)}]
+               [:> shortcuts-keys* {:content content
+                                    :command command
+                                    :is-customized customized?}])]])))]))
 
 (mf/defc section-title*
   [{:keys [name is-visible is-sub on-click]}]

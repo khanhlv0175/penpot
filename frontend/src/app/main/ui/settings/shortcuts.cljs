@@ -352,7 +352,7 @@
 
          [:div {:class (stl/css :shortcuts-info-wrapper)}
           [:> icon* {:class (stl/css :shortcuts-not-assigned-icon)
-                     :icon-id i/detach}]
+                     :icon-id i/broken-link}]
           [:p {:class (stl/css :shortcuts-text)}
            (tr "shortcuts.not-assigned")]]]
 
