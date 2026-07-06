@@ -335,18 +335,7 @@
         [:span {:class (stl/css :item-name)}
          (if (= renderer :wasm)
            (tr "workspace.header.menu.disable-webgl")
-           (tr "workspace.header.menu.enable-webgl"))]])
-
-     [:> dropdown-menu-item* {:on-click    show-shortcuts
-                              :class       (stl/css :base-menu-item :submenu-item)
-                              :on-key-down (fn [event]
-                                             (when (kbd/enter? event)
-                                               (show-shortcuts event)))
-                              :data-testid "change-shortcuts"
-                              :id          "file-menu-change-shortcuts"}
-      [:span {:class (stl/css :item-name)}
-       (tr "workspace.header.menu.change-shortcuts")]
-      [:> shortcuts* {:id :show-shortcuts}]]]))
+           (tr "workspace.header.menu.enable-webgl"))]])]))
 
 (mf/defc view-menu*
   {::mf/private true

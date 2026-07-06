@@ -47,23 +47,24 @@
                         :variant "ghost"
                         :aria-label  (tr "labels.close")
                         :on-click handle-close-dialog
+                        :tooltip-class (stl/css :close-btn-tooltip)
                         :icon i/close}]
       [:div {:class (stl/css :modal-title)}
-       "Restore default configuration"]
+       (tr "restore-shortcuts.modal-title")]
 
       [:div {:class (stl/css :modal-content)}
        [:div {:class (stl/css :modal-content-text)}
-        "The following shortcuts will be restored to their default values."]
+        (tr "restore-shortcuts.modal-text")]
 
        [:table {:class (stl/css :shortcuts-table)}
         [:thead
          [:tr {:class (stl/css :shortcuts-list-header)}
           [:th {:class (stl/css :shortcut-header-name)}
-           "Shortcut name"]
+           (tr "restore-shortcuts.acction")]
           [:th {:class (stl/css :shortcut-header-command)}
-           "Current"]
+           (tr "labels.current")]
           [:th {:class (stl/css :shortcut-header-command)}
-           "Default"]]]
+           (tr "labels.default")]]]
         [:tbody {:class (stl/css :shortcuts-list-body)}
          (for [shortcut-key (keys custom-shortcuts)]
            (let [default-command (:command (get workspace-shortcuts-raw shortcut-key))
@@ -83,6 +84,7 @@
                  default-penultimate     (last default-short-char-list)
 
                  current-command (or (get custom-shortcuts shortcut-key) default-command)
+
                  current-managed-list    (if (coll? current-command)
                                            current-command
                                            (conj () current-command))
@@ -101,14 +103,16 @@
               [:td {:class (stl/css :shortcut-name)}
                (ss/translation-keyname :sc shortcut-key)]
               [:td {:class (stl/css :shortcut-command)}
-               (for [chars current-short-char-list]
-                 [:* {:key (str/join chars)}
-                  (for [char chars]
-                    [:> ss/converted-chars* {:key (dm/str char "-" (name shortcut-key))
-                                             :char char
-                                             :class (stl/css :default-command)
-                                             :command shortcut-key}])
-                  (when (not= chars current-penultimate) [:span {:class (stl/css :space)} ","])])
+               (if (str/blank? current-command)
+                 [:span {:class (stl/css :shortcut-empty)} "-"]
+                 (for [chars current-short-char-list]
+                   [:* {:key (str/join chars)}
+                    (for [char chars]
+                      [:> ss/converted-chars* {:key (dm/str char "-" (name shortcut-key))
+                                               :char char
+                                               :class (stl/css :default-command)
+                                               :command shortcut-key}])
+                    (when (not= chars current-penultimate) [:span {:class (stl/css :space)} ","])]))
                (when (not= current-last-element current-penultimate)
                  [:*
                   [:span {:class (stl/css :space)} (tr "shortcuts.or")]
@@ -147,4 +151,4 @@
                      :type "button"
                      :variant "primary"
                      :on-click handle-accept-dialog}
-         "restore all"]]]]]))
+         (tr "restore-shortcuts.restore")]]]]]))

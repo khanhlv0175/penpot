@@ -15,12 +15,12 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.path.shortcuts]
    [app.main.data.workspace.shortcuts]
-   [app.main.data.workspace.shortcuts.customize :as customize]
    [app.main.refs :as refs]
+   [app.main.router :as rt]
    [app.main.store :as st]
+   [app.main.ui.components.button-link :as bl]
    [app.main.ui.components.search-bar :refer [search-bar*]]
-   [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i  :refer [icon*]]
    [app.main.ui.ds.product.panel-title :refer [panel-title*]]
    [app.main.ui.shortcuts :as ss]
    [app.util.dom :as dom]
@@ -113,21 +113,16 @@
          (fn [value]
            (manage-sections-on-search value)
            (reset! filter-term value)))
+
         on-search-clear-click
         (mf/use-callback
          (fn [_]
            (reset! open-sections [[1]])
            (reset! filter-term "")))
 
-        on-reset-shortcut
-        (mf/use-callback
-         (fn [shortcut-key]
-           (st/emit! (customize/reset-custom-shortcut shortcut-key))))
-
-        on-reset-all
-        (mf/use-callback
-         (fn [_]
-           (st/emit! (customize/reset-all-custom-shortcuts))))]
+        go-to-edit-shortcuts
+        (mf/use-fn
+         #(st/emit! (rt/nav :settings-shortcuts)))]
 
     [:div {:class (dm/str class " " (stl/css :shortcuts))}
      [:> panel-title* {:class (stl/css :shortcuts-title)
@@ -140,13 +135,7 @@
                        :value @filter-term
                        :placeholder (tr "shortcuts.title")
                        :icon-id i/search
-                       :auto-focus true}]
-      (when (seq custom-shortcuts)
-        [:> icon-button* {:variant "ghost"
-                          :aria-label (tr "shortcuts.reset-all")
-                          :on-click on-reset-all
-                          :icon i/reload
-                          :icon-size "s"}])]
+                       :auto-focus true}]]
 
      (if match-any?
        [:div {:class (stl/css :shortcuts-list)}
@@ -159,6 +148,12 @@
                                       :filter-term filter-term
                                       :editable? false
                                       :custom-shortcuts custom-shortcuts
-                                      :all-shortcuts all-workspace-shortcuts
-                                      :on-reset on-reset-shortcut}]))]
-       [:div {:class (stl/css :not-found)} (tr "shortcuts.not-found")])]))
+                                      :all-shortcuts all-workspace-shortcuts}]))]
+       [:div {:class (stl/css :not-found)} (tr "shortcuts.not-found")])
+     [:> bl/button-link* {:on-click go-to-edit-shortcuts
+                          :label (tr "shortcuts.edit-on-settings")
+                          :class (stl/css :edit-shortcuts-button)
+                          :icon (mf/html
+                                 [:> icon* {:icon-id i/open-link
+                                            :size "m"
+                                            :aria-hidden true}])}]]))

@@ -17,6 +17,7 @@
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.notifications.context-notification :refer [context-notification*]]
+   [app.main.ui.ds.tooltip.tooltip :refer [tooltip*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [app.util.strings :refer [matches-search]]
@@ -401,14 +402,15 @@
         filtered              (if (and (or is-match-section is-match-subsection) (not match-shortcut?))
                                 shortcut-translations
                                 (filter #(matches-search % @filter-term) shortcut-translations))
-        sorted-filtered       (sort filtered)]
+        sorted-filtered       (sort filtered)
+        trigger-ref            (mf/use-ref nil)]
 
     [:ul {:class (stl/css :sub-menu)}
      (for [command-translate sorted-filtered]
         (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
               [command  comand-info] sc-by-translate
               content                (or (:show-command comand-info) (:command comand-info))
-              customized?            (and editable? (contains? custom-shortcuts command))]
+              customized?            (contains? custom-shortcuts command)]
          (if editable?
            [:> shortcut-row-editable* {:elements elements
                                        :all-shortcuts all-shortcuts
@@ -423,10 +425,16 @@
              command-translate]
             [:div {:class (stl/css :shortcut-actions)}
              (if (and customized? (str/blank? content))
-               [:> icon* {:icon-id i/broken-link
-                          :aria-label "Not assigned shortcut"
-                          :size "s"
-                          :class (stl/css :shortcut-detach-icon)}]
+               ;; TODO shortctus, add translation
+               [:> tooltip* {:content "Not assigned shortcut"
+                             :trigger-ref trigger-ref
+                             :id (dm/str command-translate "-tooltip")
+                             :class (stl/css :option-text)}
+                [:> icon* {:icon-id i/broken-link
+                           :aria-labelledby (dm/str command-translate "-tooltip")
+                           :size "s"
+                           :ref trigger-ref
+                           :class (stl/css :shortcut-detach-icon)}]]
                [:> shortcuts-keys* {:content content
                                     :command command
                                     :is-customized customized?}])]])))]))

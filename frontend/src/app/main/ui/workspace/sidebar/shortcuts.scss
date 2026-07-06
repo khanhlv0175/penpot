@@ -54,3 +54,13 @@
   color: var(--color-foreground-secondary);
   margin: var(--sp-m);
 }
+
+.edit-shortcuts-button {
+  @include t.use-typography("headline-small");
+
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+  justify-content: center;
+}

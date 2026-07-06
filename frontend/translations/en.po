@@ -2862,6 +2862,11 @@ msgstr "Create new team"
 msgid "labels.create-team.placeholder"
 msgstr "Enter new team name"
 
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "labels.current"
+msgstr "Current"
+
 #, unused
 msgid "labels.custom-fonts"
 msgstr "Custom fonts"
@@ -2869,6 +2874,10 @@ msgstr "Custom fonts"
 #: src/app/main/ui/settings/sidebar.cljs:82
 msgid "labels.dashboard"
 msgstr "Dashboard"
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "labels.default"
+msgstr "Default"
 
 #: src/app/main/ui/dashboard/file_menu.cljs:337, src/app/main/ui/dashboard/fonts.cljs:286, src/app/main/ui/dashboard/fonts.cljs:363, src/app/main/ui/dashboard/fonts.cljs:397, src/app/main/ui/dashboard/project_menu.cljs:115, src/app/main/ui/dashboard/team.cljs:1379, src/app/main/ui/settings/integrations.cljs:389, src/app/main/ui/settings/profile.cljs:117, src/app/main/ui/settings/profile.cljs:128, src/app/main/ui/settings/profile.cljs:129, src/app/main/ui/workspace/sidebar/assets/common.cljs:231, src/app/main/ui/workspace/sidebar/options/menus/component.cljs:223, src/app/main/ui/workspace/sidebar/versions.cljs:258, src/app/main/ui/workspace/tokens/management/forms/generic_form.cljs:353, src/app/main/ui/workspace/tokens/management/node_context_menu.cljs:111, src/app/main/ui/workspace/tokens/sets/context_menu.cljs:66, src/app/main/ui/workspace/tokens/themes/create_modal.cljs:378
 msgid "labels.delete"
@@ -5655,27 +5664,6 @@ msgstr "Combination assigned to \"%s\". Saving will remove it there."
 msgid "shortcuts.edit-modal.success"
 msgstr "Combination assigned to \"%s\" applied successfully"
 
-msgid "shortcuts.reset-all"
-msgstr "Reset all shortcuts"
-
-msgid "shortcuts.edit-modal.title"
-msgstr "Edit shortcut"
-
-msgid "shortcuts.edit-modal.current"
-msgstr "Current shortcut"
-
-
-msgid "shortcuts.edit-modal.recording"
-msgstr "Recording..."
-
-
-
-msgid "shortcuts.edit-modal.save"
-msgstr "Save"
-
-msgid "shortcuts.edit-modal.cancel"
-msgstr "Cancel"
-
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:182
 msgid "shortcuts.toggle-alignment"
 msgstr "Toggle dynamic alignment"
@@ -5783,6 +5771,26 @@ msgstr "Zoom lense increase"
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:211
 msgid "shortcuts.zoom-selected"
 msgstr "Zoom to selected"
+
+#: src/app/main/ui/workspace/sidebar/shortcuts.cljs
+msgid "shortcuts.edit-on-settings"
+msgstr "Customize on settings"
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "restore-shortcuts.moda-title"
+msgstr "Restore to default configuration"
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "restore-shortcuts.modal-text"
+msgstr "The following shortcuts will be restored to their default values."
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "restore-shortcuts.acction"
+msgstr "Acction"
+
+#: src/app/main/ui/settings/restore_shortcuts_modal.cljs
+msgid "restore-shortcuts.restore"
+msgstr "Restore"
 
 #: src/app/main/ui/dashboard/subscription.cljs:191
 msgid "subscription.banner.create-org-info"

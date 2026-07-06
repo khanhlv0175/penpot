@@ -21,6 +21,7 @@
    [app.main.ui.ds.foundations.typography.heading :refer [heading*]]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.ds.product.empty-state :refer [empty-state*]]
+   [app.main.ui.settings.restore-shortcuts-modal]
    [app.main.ui.shortcuts :as ss]
    [app.util.dom :as dom]
    [app.util.strings :refer [matches-search]]
@@ -245,8 +246,7 @@
          (mf/deps custom-shortcuts)
          (fn [event]
            (dom/stop-propagation event)
-           (st/emit! (modal/show :restore-all-modal
-                                 {:type :restore-all-modal
+           (st/emit! (modal/show {:type :restore-all-modal
                                   :custom-shortcuts custom-shortcuts}))))
 
         on-import-file
