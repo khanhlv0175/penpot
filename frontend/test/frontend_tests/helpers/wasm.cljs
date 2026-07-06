@@ -161,12 +161,26 @@
   "Stores the original WASM function values so they can be restored."
   (atom {}))
 
+;; Nesting depth of setup/teardown pairs. Only the outermost setup saves the
+;; originals and installs the mocks, and only the outermost teardown restores
+;; them, so a `with-wasm-mocks*` inside a fixture that already installed the
+;; mocks does not capture mocks as "originals" and leak them.
+(def ^:private install-depth (atom 0))
+
+(declare install-wasm-mocks!)
+
 (defn setup-wasm-mocks!
   "Install WASM mocks via `set!` that persist across async boundaries.
-   Also resets call counts. Call `teardown-wasm-mocks!` to restore."
+   Also resets call counts. Call `teardown-wasm-mocks!` to restore.
+   Nested calls are no-ops apart from resetting call counts."
   []
   ;; Reset call tracking
   (reset-call-counts!)
+  (when (= 1 (swap! install-depth inc))
+    (install-wasm-mocks!)))
+
+(defn- install-wasm-mocks!
+  []
   ;; Save originals
   (reset! originals
           {:initialized?            wasm.api/initialized?
@@ -201,8 +215,16 @@
   (set! wasm.fonts/make-font-data        mock-make-font-data)
   (set! wasm.fonts/get-content-fonts     mock-get-content-fonts))
 
+(declare restore-wasm-mocks!)
+
 (defn teardown-wasm-mocks!
-  "Restore the original WASM functions saved by `setup-wasm-mocks!`."
+  "Restore the original WASM functions saved by `setup-wasm-mocks!`.
+   Nested calls are no-ops; only the outermost teardown restores."
+  []
+  (when (zero? (swap! install-depth #(max 0 (dec %))))
+    (restore-wasm-mocks!)))
+
+(defn- restore-wasm-mocks!
   []
   (let [orig @originals]
     (set! wasm.api/initialized?            (:initialized? orig))
