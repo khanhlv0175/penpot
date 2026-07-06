@@ -104,11 +104,12 @@
                                   :settings-item true)
              :on-click go-settings-notifications}
         [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]
-       
-       [:li {:class (stl/css-case :current shortcuts?
-                                  :settings-item true)
-             :on-click go-settings-shortcuts}
-        [:span {:class (stl/css :element-title)} (tr "labels.shortcuts")]]
+
+       (when (contains? cf/flags :custom-shortcuts)
+         [:li {:class (stl/css-case :current shortcuts?
+                                    :settings-item true)
+               :on-click go-settings-shortcuts}
+          [:span {:class (stl/css :element-title)} (tr "labels.shortcuts")]])
 
        [:li {:class (stl/css-case :current options?
                                   :settings-item true)
