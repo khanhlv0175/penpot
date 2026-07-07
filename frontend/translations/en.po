@@ -5662,7 +5662,7 @@ msgstr "Combination assigned to \"%s\". Saving will remove it there."
 
 #: src/app/main/ui/shortcuts.cljs
 msgid "shortcuts.edit-modal.success"
-msgstr "Combination assigned to \"%s\" applied successfully"
+msgstr "This key combination is available and can be assigned without conflicts."
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:182
 msgid "shortcuts.toggle-alignment"

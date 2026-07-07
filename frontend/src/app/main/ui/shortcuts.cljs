@@ -438,7 +438,7 @@
             [:> context-notification* {:level :warning :class (stl/css :modal-error-msg)}
              (tr "shortcuts.edit-modal.conflict" (:name conflict))]
             [:> context-notification* {:level :success :class (stl/css :modal-success-msg)}
-             (tr "shortcuts.edit-modal.success" command-translate)]))
+             (tr "shortcuts.edit-modal.success")]))
         [:div {:class (stl/css :edit-buttons)}
          [:div {:class (stl/css :confirmation-buttons)}
           [:> icon-button* {:variant "secondary"

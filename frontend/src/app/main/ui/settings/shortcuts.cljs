@@ -30,10 +30,6 @@
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
-(def ^:private workspace-shortcuts-raw
-  (d/deep-merge app.main.data.workspace.path.shortcuts/shortcuts
-                app.main.data.workspace.shortcuts/shortcuts))
-
 (mf/defc search-section*
   [{:keys [filter-term on-search-term-change on-search-clear-click on-restore-all show-restore-all? has-custom-shortcuts]}]
   [:div {:class (stl/css :shortcuts-search-section)}

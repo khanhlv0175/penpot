@@ -5519,7 +5519,7 @@ msgstr "Combinación usada en \"%s\". Guardar este atajo hará que se elimine al
 
 #: src/app/main/ui/shortcuts.cljs
 msgid "shortcuts.edit-modal.success"
-msgstr "La combinación asignada a \"%s\" ha sido aplicada satisfactoriamente"
+msgstr "Esta combinación de teclas está disponible y puede asignarse sin conflictos."
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:185
 msgid "shortcuts.toggle-alignment"
