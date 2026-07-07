@@ -218,7 +218,12 @@
 
         custom-shortcuts           (get-in profile [:props :custom-shortcuts])
 
-        workspace-shortcuts-custom (ds/apply-custom-overrides workspace-shortcuts-raw custom-shortcuts)
+        path-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.path.shortcuts/shortcuts custom-shortcuts)
+        path-shortcuts        (->> path-shortcuts-custom
+                                        (ss/add-translation :sc)
+                                        (into {}))
+
+        workspace-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.shortcuts/shortcuts custom-shortcuts)
 
         workspace-shortcuts        (->> workspace-shortcuts-custom
                                         (ss/add-translation :sc)
@@ -236,10 +241,11 @@
                                         (ss/add-translation :sc)
                                         (into {}))
 
-        all-shortcuts-raw (merge workspace-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
+        all-shortcuts-raw (merge workspace-shortcuts-custom path-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
 
         {:keys [all-shortcuts]}
-        (ss/build-all-shortcuts workspace-shortcuts dashboard-shortcuts viewer-shortcuts)
+        (ss/build-all-shortcuts-without-basics
+         workspace-shortcuts  path-shortcuts dashboard-shortcuts viewer-shortcuts)
 
         on-restore-all
         (mf/use-fn

@@ -4933,6 +4933,10 @@ msgstr "Seleccionar elementos que usan este estilo"
 msgid "shortcut-section.basics"
 msgstr "Básicos"
 
+#: src/app/main/ui/shortcuts.cljs
+msgid "shortcut-section.path"
+msgstr "Modo eidición de rutas"
+
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:418
 msgid "shortcut-section.dashboard"
 msgstr "Panel"

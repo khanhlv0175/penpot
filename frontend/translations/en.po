@@ -5064,6 +5064,10 @@ msgstr "Select items using this style"
 msgid "shortcut-section.basics"
 msgstr "Basics"
 
+#: src/app/main/ui/shortcuts.cljs
+msgid "shortcut-section.path"
+msgstr "Path edition"
+
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:418
 msgid "shortcut-section.dashboard"
 msgstr "Dashboard"

@@ -192,6 +192,61 @@
      :all-sub-names all-sub-names
      :all-section-names all-section-names}))
 
+(defn build-all-shortcuts-without-basics
+  [workspace-sc path-sc dashboard-sc viewer-sc]
+  (let [walk (fn walk [element parent-id]
+               (if (nil? element)
+                 element
+                 (let [rec-fn (fn [index [k item]]
+                                (let [item-id (if (nil? parent-id)
+                                                [index]
+                                                (conj parent-id index))]
+                                  [k (assoc item :id item-id :children (walk (:children item) item-id))]))]
+                   (into {} (map-indexed (partial rec-fn) element)))))
+        ws-subs (->> (shortcuts->subsections workspace-sc)
+                     (add-translation :sub-sec)
+                     (into {}))
+        pt-subs (->> (shortcuts->subsections path-sc)
+                     (add-translation :sub-sec)
+                     (into {}))
+        db-subs (->> (shortcuts->subsections dashboard-sc)
+                     (add-translation :sub-sec)
+                     (into {}))
+        vw-subs (->> (shortcuts->subsections viewer-sc)
+                     (add-translation :sub-sec)
+                     (into {}))
+        ws-subs  (dissoc ws-subs :basics)
+        db-subs  (dissoc db-subs :basics)
+        vw-subs  (dissoc vw-subs :basics)
+        all      {:workspace {:id [1]
+                              :children ws-subs
+                              :translation (tr "shortcut-section.workspace")}
+                  :path      {:id [2]
+                              :children pt-subs
+                              :translation (tr "shortcut-section.path")}
+                  :dashboard {:id [3]
+                              :children db-subs
+                              :translation (tr "shortcut-section.dashboard")}
+                  :viewer    {:id [4]
+                              :children vw-subs
+                              :translation (tr "shortcut-section.viewer")}}
+        all      (walk all nil)
+        all-sc-names (map #(translation-keyname :sc %)
+                          (concat (keys workspace-sc)
+                                  (keys path-sc)
+                                  (keys dashboard-sc)
+                                  (keys viewer-sc)))
+        all-sub-names (map #(translation-keyname :sub-sec %)
+                           (concat (keys ws-subs)
+                                   (keys pt-subs)
+                                   (keys db-subs)
+                                   (keys vw-subs)))
+        all-section-names (map #(translation-keyname :sec %) (keys all))]
+    {:all-shortcuts all
+     :all-sc-names all-sc-names
+     :all-sub-names all-sub-names
+     :all-section-names all-section-names}))
+
 (mf/defc converted-chars*
   [{:keys [char command class]}]
   (let [modified-keys {:up    ds/up-arrow
@@ -234,7 +289,7 @@
                                 :char char
                                 :command command
                                 :class (when is-customized (stl/css :customized-key))}])
-        
+
         (when (not= chars penultimate) [:span {:class (stl/css :space)} ","])])
      (when (not= last-element penultimate)
        [:*
@@ -426,10 +481,10 @@
 
     [:ul {:class (stl/css :sub-menu)}
      (for [command-translate sorted-filtered]
-        (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
-              [command  comand-info] sc-by-translate
-              content                (or (:show-command comand-info) (:command comand-info))
-              customized?            (contains? custom-shortcuts command)]
+       (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
+             [command  comand-info] sc-by-translate
+             content                (or (:show-command comand-info) (:command comand-info))
+             customized?            (contains? custom-shortcuts command)]
          (if editable?
            [:> shortcut-row-editable* {:elements elements
                                        :all-shortcuts all-shortcuts
