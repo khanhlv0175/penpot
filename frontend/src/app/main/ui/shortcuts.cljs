@@ -292,6 +292,17 @@
            (dom/stop-propagation event)
            (clean-editing-state)))
 
+        disabled-shortcut
+        (mf/use-fn
+         (mf/deps command)
+         (fn [event]
+           (dom/prevent-default event)
+           (st/emit! (customize/set-custom-shortcut
+                      command
+                      ""
+                      nil))
+           (clean-editing-state)))
+
         save-fn
         (mf/use-fn
          (mf/deps recorded-command conflict command)
@@ -385,14 +396,22 @@
                             :on-click save-fn
                             :icon i/tick
                             :icon-size "m"}]]
-         (when customized?
-           [:> icon-button* {:variant "secondary"
-                             :aria-label (tr "shortcuts.reset")
-                             :on-click (fn [e]
-                                         (dom/stop-propagation e)
-                                         (on-reset-shortcut command))
-                             :icon i/reload
-                             :icon-size "m"}])]])]))
+         [:div {:class (stl/css :confirmation-buttons)}
+          [:> icon-button* {:variant "secondary"
+                            :aria-label "disable shortcut"
+                            :on-click (fn [e]
+                                        (dom/stop-propagation e)
+                                        (disabled-shortcut command))
+                            :icon i/broken-link
+                            :icon-size "m"}]
+          (when customized?
+            [:> icon-button* {:variant "secondary"
+                              :aria-label (tr "shortcuts.reset")
+                              :on-click (fn [e]
+                                          (dom/stop-propagation e)
+                                          (on-reset-shortcut command))
+                              :icon i/reload
+                              :icon-size "m"}])]]])]))
 
 (mf/defc shortcut-row*
   [{:keys [elements all-shortcuts all-sc-raw filter-term is-match-section is-match-subsection
