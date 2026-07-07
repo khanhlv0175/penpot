@@ -436,6 +436,7 @@
                                        :custom-shortcuts custom-shortcuts
                                        :on-reset on-reset
                                        :all-sc-raw all-sc-raw
+                                       :key command-translate
                                        :command-translate command-translate}]
            [:li {:class (stl/css-case :shortcuts-name true
                                       :customized customized?)
