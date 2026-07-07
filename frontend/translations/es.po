@@ -5474,6 +5474,10 @@ msgid "shortcuts.title"
 msgstr "Atajos de teclado"
 
 #: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.reset"
+msgstr "Restablecer valor por defecto"
+
+#: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.no-personalized"
 msgstr "Dirígete a TODO para personalizar tus atajos."
 

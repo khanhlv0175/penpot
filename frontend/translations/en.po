@@ -5617,10 +5617,6 @@ msgid "shortcuts.title"
 msgstr "Keyboard shortcuts"
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.edit"
-msgstr "Edit shortcut"
-
-#: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.reset"
 msgstr "Reset to default"
 
