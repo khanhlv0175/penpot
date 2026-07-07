@@ -122,7 +122,7 @@
 
         go-to-edit-shortcuts
         (mf/use-fn
-         #(st/emit! (rt/nav :settings-shortcuts)))]
+         #(st/emit! (rt/nav :settings-shortcuts {} {::rt/new-window true})))]
 
     [:div {:class (dm/str class " " (stl/css :shortcuts))}
      [:> panel-title* {:class (stl/css :shortcuts-title)
