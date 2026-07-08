@@ -276,9 +276,8 @@
   (ptk/reify ::rebind-shortcuts
     ptk/EffectEvent
     (effect [_ state _]
-      (let [[_key shortcuts] (last (:shortcuts state))
-            custom-overrides (get-in state [:profile :props :custom-shortcuts])
+      (let [custom-overrides (get-in state [:profile :props :custom-shortcuts])
             group-key        (:shortcuts-group-key state)
-            effective        (apply-custom-overrides shortcuts custom-overrides group-key)]
-        (when shortcuts
-          (reset! effective))))))
+            merged           (reduce merge (map val (:shortcuts state)))
+            effective        (apply-custom-overrides merged custom-overrides group-key)]
+        (reset! effective)))))

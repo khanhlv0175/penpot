@@ -185,6 +185,11 @@
   color: var(--color-foreground-primary);
 }
 
+.conflict-key {
+  background-color: var(--color-background-error);
+  color: var(--color-foreground-error);
+}
+
 .space {
   margin: 0 var(--sp-xxs);
   color: var(--color-foreground-secondary);

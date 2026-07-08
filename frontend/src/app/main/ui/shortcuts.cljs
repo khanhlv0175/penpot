@@ -104,6 +104,36 @@
         {:key  conflicting-key
          :name (translation-keyname :sc conflicting-key)}))))
 
+(defn build-conflicts-map
+  "Builds a map of shortcut-keys that have a conflict.
+   A conflict is when a customized shortcut uses the same key combo as a
+   non-customized shortcut's default command. Each shortcut-map is a
+   separate context — conflicts are only checked within the same context.
+   Returns a map of :keyword victim-key -> :keyword customized-key."
+  [shortcut-maps custom-shortcuts]
+  (reduce
+   (fn [acc shortcuts]
+     (let [defaults-index  (ds/build-command-index shortcuts)
+           context-keys    (set (keys shortcuts))
+           context-customs (into []
+                                 (comp
+                                  (filter (fn [[k _]] (contains? context-keys k)))
+                                  (filter (fn [[k _]] (not (str/blank? (get custom-shortcuts k))))))
+                                 custom-shortcuts)]
+       (reduce
+        (fn [result [sc-key custom-key]]
+          (if-let [conflicting-key (get defaults-index custom-key)]
+            (if (and (not= conflicting-key sc-key)
+                     (not (contains? custom-shortcuts conflicting-key))
+                     (str/blank? (get custom-shortcuts conflicting-key)))
+              (assoc result conflicting-key sc-key)
+              result)
+            result))
+        acc
+        context-customs)))
+   {}
+   shortcut-maps))
+
 (defn import-custom-shortcuts
   [shortcuts all-shortcuts]
   (let [current-customs (get-in shortcuts
@@ -118,7 +148,7 @@
                                (:key conflict)
                                (assoc (:key conflict) ""))))
                          {}
-                         shortcuts)
+                         (:workspace shortcuts))
 
         new-customs      (assoc current-customs :workspace imported-ws)]
 
@@ -289,7 +319,7 @@
             :key unique-key} char]))
 
 (mf/defc shortcuts-keys*
-  [{:keys [content command is-customized]}]
+  [{:keys [content command is-customized has-conflict?]}]
   (let [managed-list    (if (coll? content)
                           content
                           (conj () content))
@@ -306,7 +336,9 @@
           [:> converted-chars* {:key (dm/str char "-" (name command))
                                 :char char
                                 :command command
-                                :class (when is-customized (stl/css :customized-key))}])
+                                :class (cond
+                                         has-conflict? (stl/css :conflict-key)
+                                         is-customized (stl/css :customized-key))}])
 
         (when (not= chars penultimate) [:span {:class (stl/css :space)} ","])])
      (when (not= last-element penultimate)
@@ -316,10 +348,12 @@
           [:> converted-chars* {:key (dm/str char "-" (name command))
                                 :char char
                                 :command command
-                                :class (when is-customized (stl/css :customized-key))}])])]))
+                                :class (cond
+                                         has-conflict? (stl/css :conflict-key)
+                                         is-customized (stl/css :customized-key))}])])]))
 
 (mf/defc shortcut-row-editable*
-  [{:keys [elements custom-shortcuts command-translate section-key]}]
+  [{:keys [elements custom-shortcuts command-translate conflicts section-key]}]
   (let [{:keys [workspace-sc-trans dashboard-sc-trans viewer-sc-trans]} (mf/use-ctx ctx/shortcuts-ctx)
         section-shortcuts (case section-key
                             (:workspace :path) workspace-sc-trans
@@ -332,6 +366,7 @@
         group-map              (get custom-shortcuts section-key)
         group-map              (if (map? group-map) group-map {})
         customized?            (contains? group-map command)
+        has-conflict?          (contains? conflicts command)
         is-editing*            (mf/use-state false)
         is-editing             (deref is-editing*)
 
@@ -441,9 +476,21 @@
                     :size "s"
                     :class (stl/css :shortcut-detach-icon)}]
 
-         [:> shortcuts-keys* {:content content
-                              :command command
-                              :is-customized customized?}])]]
+         (if has-conflict?
+           (let [conflicting-key (get conflicts command)
+                 conflict-name   (translation-keyname :sc conflicting-key)]
+             ;;TODO Add translation for "This shortcut has been overridden by ..."
+             [:> tooltip* {:content (str "This shortcut has been overridden by " conflict-name)
+                           :id (dm/str (name command) "-conflict-tooltip")
+                           :class (stl/css :option-text)}
+              [:> shortcuts-keys* {:content content
+                                   :command command
+                                   :is-customized customized?
+                                   :has-conflict? has-conflict?}]])
+           [:> shortcuts-keys* {:content content
+                                :command command
+                                :is-customized customized?
+                                :has-conflict? has-conflict?}]))]]
      (when is-editing
        [:div {:class (stl/css :shortcut-editing)
               :ref recording-ref
@@ -499,7 +546,7 @@
 
 (mf/defc shortcut-row*
   [{:keys [elements filter-term is-match-section is-match-subsection
-           editable? custom-shortcuts section-key]}]
+           editable? custom-shortcuts section-key conflicts]}]
   (let [shortcut-translations (->> elements vals (map :translation) sort)
         match-shortcut?       (some #(matches-search % @filter-term) shortcut-translations)
         filtered              (if (and (or is-match-section is-match-subsection) (not match-shortcut?))
@@ -515,13 +562,15 @@
              content                (or (:show-command comand-info) (:command comand-info))
              group-map              (get custom-shortcuts section-key)
              group-map              (if (map? group-map) group-map {})
-             customized?            (contains? group-map command)]
+             customized?            (contains? group-map command)
+             has-conflict?          (contains? conflicts command)]
          (if editable?
            [:> shortcut-row-editable* {:elements elements
                                        :custom-shortcuts custom-shortcuts
                                        :section-key section-key
                                        :key command-translate
-                                       :command-translate command-translate}]
+                                       :command-translate command-translate
+                                       :conflicts conflicts}]
            [:li {:class (stl/css-case :shortcuts-name true
                                       :customized customized?)
                  :key command-translate}
@@ -539,9 +588,21 @@
                            :size "s"
                            :ref trigger-ref
                            :class (stl/css :shortcut-detach-icon)}]]
-               [:> shortcuts-keys* {:content content
-                                    :command command
-                                    :is-customized customized?}])]])))]))
+               (if has-conflict?
+                 (let [conflicting-key (get conflicts command)
+                       conflict-name   (translation-keyname :sc conflicting-key)]
+                   [:> tooltip* {:content (str "This shortcut has been overridden by " conflict-name)
+                                 :id (dm/str (name command) "-conflict-tooltip")
+                                 :class (stl/css :option-text)}
+                    [:> shortcuts-keys* {:content content
+                                         :command command
+                                         :is-customized customized?
+                                         :has-conflict? has-conflict?}]])
+                 [:> shortcuts-keys* {:content content
+                                      :command command
+                                      :is-customized customized?
+                                      :has-conflict? has-conflict?}]))]])))]))
+
 
 (mf/defc section-title*
   [{:keys [name is-visible is-sub on-click]}]
@@ -563,7 +624,7 @@
 
 (mf/defc shortcut-subsection*
   [{:keys [subsections manage-sections filter-term is-match-section open-sections
-           editable? custom-shortcuts section-key]}]
+           editable? custom-shortcuts section-key conflicts]}]
   (let [open-sections (normalize-open-sections open-sections)]
     (if (= :none (first (keys subsections)))
       [:> shortcut-row* {:elements (:children (:none subsections))
@@ -572,7 +633,8 @@
                          :is-match-subsection true
                          :editable? editable?
                          :custom-shortcuts custom-shortcuts
-                         :section-key section-key}]
+                         :section-key section-key
+                         :conflicts conflicts}]
 
       [:ul {:class (stl/css :subsection-menu)}
        (for [[sub-name sub-info] subsections]
@@ -590,11 +652,13 @@
                                 :is-match-subsection true
                                 :editable? editable?
                                 :custom-shortcuts custom-shortcuts
-                                :section-key section-key}]]]))])))
+                                :section-key section-key
+                                :conflicts conflicts}]]]))])))
+
 
 (mf/defc shortcut-section*
   [{:keys [section manage-sections open-sections filter-term
-           editable? custom-shortcuts]}]
+           editable? custom-shortcuts conflicts]}]
   (let [open-sections (normalize-open-sections open-sections)
         [section-key section-info] section
         section-id          (:id section-info)
@@ -615,4 +679,5 @@
                                 :filter-term filter-term
                                 :editable? editable?
                                 :custom-shortcuts custom-shortcuts
-                                :section-key section-key}]]]))
+                                :section-key section-key
+                                :conflicts conflicts}]]]))

@@ -80,7 +80,7 @@
          set)))
 
 (mf/defc shortcuts-list*
-  [{:keys [shortcuts open-sections filter-term custom-shortcuts editable? manage-sections]}]
+  [{:keys [shortcuts open-sections filter-term custom-shortcuts editable? manage-sections conflicts]}]
   (let [sections (keep (fn [section]
                          (when (seq (get-in section [1 :children]))
                            section))
@@ -94,10 +94,11 @@
                                    :open-sections open-sections
                                    :filter-term filter-term
                                    :editable? editable?
-                                   :custom-shortcuts custom-shortcuts}]))]))
+                                   :custom-shortcuts custom-shortcuts
+                                   :conflicts conflicts}]))]))
 
 (mf/defc shortcuts-tab-section*
-  [{:keys [shortcut-filter show-restore-all? on-restore-all empty-str custom-shortcuts]}]
+  [{:keys [shortcut-filter show-restore-all? on-restore-all empty-str custom-shortcuts conflicts]}]
   (let [{:keys [all-shortcuts]} (mf/use-ctx ctx/shortcuts-ctx)
         open-sections*   (mf/use-state [[0]])
         open-sections    (deref open-sections*)
@@ -159,7 +160,8 @@
                             :filter-term filter-term*
                             :custom-shortcuts custom-shortcuts
                             :editable? true
-                            :manage-sections manage-sections}]
+                            :manage-sections manage-sections
+                            :conflicts conflicts}]
 
        [:> empty-state* {:text empty-str
                          :class (stl/css :shortcuts-empty-state)}])]))
@@ -227,7 +229,7 @@
                                                          (ss/add-translation :sc)
                                                          (into {}))
 
-        all-shortcuts-raw (d/deep-merge workspace-shortcuts-custom path-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
+        all-shortcuts-raw (d/deep-merge workspace-shortcuts-custom path-shortcuts-custom path-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
 
         {:keys [all-shortcuts]}
         (ss/build-all-shortcuts-without-basics
