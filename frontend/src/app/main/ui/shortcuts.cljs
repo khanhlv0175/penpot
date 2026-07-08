@@ -14,6 +14,7 @@
    [app.main.data.shortcuts :as ds]
    [app.main.data.workspace.shortcuts.customize :as customize]
    [app.main.store :as st]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.notifications.context-notification :refer [context-notification*]]
@@ -109,17 +110,17 @@
                                 [:profile :props :custom-shortcuts]
                                 {})
 
-        new-customs
-        (reduce
-         (fn [customs [command recorded-command]]
-           (let [conflict (find-conflict recorded-command
-                                         all-shortcuts
-                                         command)]
-             (cond-> (assoc customs command recorded-command)
-               (:key conflict)
-               (assoc (:key conflict) ""))))
-         current-customs
-         shortcuts)]
+        ;; imported shortcuts are in flat format, store as workspace group
+        imported-ws     (reduce
+                         (fn [acc [command recorded-command]]
+                           (let [conflict (find-conflict recorded-command all-shortcuts command)]
+                             (cond-> (assoc acc command recorded-command)
+                               (:key conflict)
+                               (assoc (:key conflict) ""))))
+                         {}
+                         shortcuts)
+
+        new-customs      (assoc current-customs :workspace imported-ws)]
 
     (du/update-profile-props {:custom-shortcuts new-customs})))
 
@@ -127,9 +128,26 @@
   [type item]
   (map (fn [[k v]] [k (assoc v :translation (translation-keyname type k))]) item))
 
+(def ^:private subsection-order
+  [:alignment
+   :edit
+   :generic
+   :main-menu
+   :modify-layers
+   :navigation-dashboard
+   :navigation-workspace
+   :navigation-viewer
+   :panels
+   :path-editor
+   :text-editor
+   :tools
+   :zoom-workspace
+   :zoom-viewer])
+
 (defn shortcuts->subsections
   [shortcuts]
   (let [subsections (into #{} (mapcat :subsections) (vals shortcuts))
+        subsections (sort-by (fn [s] (.indexOf subsection-order s)) subsections)
         get-sc-by-subsection
         (fn [subsection [k v]]
           (when (some #(= subsection %) (:subsections v)) {k v}))
@@ -301,11 +319,19 @@
                                 :class (when is-customized (stl/css :customized-key))}])])]))
 
 (mf/defc shortcut-row-editable*
-  [{:keys [elements all-sc-raw custom-shortcuts command-translate]}]
-  (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
+  [{:keys [elements custom-shortcuts command-translate section-key]}]
+  (let [{:keys [workspace-sc-trans dashboard-sc-trans viewer-sc-trans]} (mf/use-ctx ctx/shortcuts-ctx)
+        section-shortcuts (case section-key
+                            (:workspace :path) workspace-sc-trans
+                            :dashboard dashboard-sc-trans
+                            :viewer viewer-sc-trans
+                            workspace-sc-trans)
+        sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
         [command  comand-info] sc-by-translate
         content                (or (:show-command comand-info) (:command comand-info))
-        customized?            (contains? custom-shortcuts command)
+        group-map              (get custom-shortcuts section-key)
+        group-map              (if (map? group-map) group-map {})
+        customized?            (contains? group-map command)
         is-editing*            (mf/use-state false)
         is-editing             (deref is-editing*)
 
@@ -329,8 +355,9 @@
 
         on-reset-shortcut
         (mf/use-fn
+         (mf/deps section-key)
          (fn [shortcut-key]
-           (st/emit! (customize/reset-custom-shortcut shortcut-key))
+           (st/emit! (customize/reset-custom-shortcut shortcut-key section-key))
            (clean-editing-state)))
 
         start-editing
@@ -349,25 +376,27 @@
 
         disabled-shortcut
         (mf/use-fn
-         (mf/deps command)
+         (mf/deps command section-key)
          (fn [event]
            (dom/prevent-default event)
            (st/emit! (customize/set-custom-shortcut
                       command
                       ""
-                      nil))
+                      nil
+                      section-key))
            (clean-editing-state)))
 
         save-fn
         (mf/use-fn
-         (mf/deps recorded-command conflict command)
+         (mf/deps recorded-command conflict command section-key)
          (fn [event]
            (dom/prevent-default event)
            (when recorded-command
              (st/emit! (customize/set-custom-shortcut
                         command
                         recorded-command
-                        (:key conflict))))
+                        (:key conflict)
+                        section-key)))
            (clean-editing-state)))
 
         on-editable-container-blur
@@ -391,7 +420,7 @@
                     (reset! display-parts* parts)
                     (when recorded-command
                       (reset! recorded-command* recorded-command)
-                      (reset! conflict* (find-conflict recorded-command all-sc-raw command)))))]
+                      (reset! conflict* (find-conflict recorded-command section-shortcuts command)))))]
           (->> (events/listen (mf/ref-val recording-ref) "keydown" on-keydown)
                (partial events/unlistenByKey)))))
 
@@ -469,8 +498,8 @@
                               :icon-size "m"}])]]])]))
 
 (mf/defc shortcut-row*
-  [{:keys [elements all-shortcuts all-sc-raw filter-term is-match-section is-match-subsection
-           editable? custom-shortcuts on-reset]}]
+  [{:keys [elements filter-term is-match-section is-match-subsection
+           editable? custom-shortcuts section-key]}]
   (let [shortcut-translations (->> elements vals (map :translation) sort)
         match-shortcut?       (some #(matches-search % @filter-term) shortcut-translations)
         filtered              (if (and (or is-match-section is-match-subsection) (not match-shortcut?))
@@ -484,13 +513,13 @@
        (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
              [command  comand-info] sc-by-translate
              content                (or (:show-command comand-info) (:command comand-info))
-             customized?            (contains? custom-shortcuts command)]
+             group-map              (get custom-shortcuts section-key)
+             group-map              (if (map? group-map) group-map {})
+             customized?            (contains? group-map command)]
          (if editable?
            [:> shortcut-row-editable* {:elements elements
-                                       :all-shortcuts all-shortcuts
                                        :custom-shortcuts custom-shortcuts
-                                       :on-reset on-reset
-                                       :all-sc-raw all-sc-raw
+                                       :section-key section-key
                                        :key command-translate
                                        :command-translate command-translate}]
            [:li {:class (stl/css-case :shortcuts-name true
@@ -534,18 +563,16 @@
 
 (mf/defc shortcut-subsection*
   [{:keys [subsections manage-sections filter-term is-match-section open-sections
-           editable? custom-shortcuts all-shortcuts on-reset all-sc-raw]}]
+           editable? custom-shortcuts section-key]}]
   (let [open-sections (normalize-open-sections open-sections)]
     (if (= :none (first (keys subsections)))
       [:> shortcut-row* {:elements (:children (:none subsections))
-                         :all-shortcuts all-shortcuts
                          :filter-term filter-term
                          :is-match-section is-match-section
                          :is-match-subsection true
                          :editable? editable?
                          :custom-shortcuts custom-shortcuts
-                         :on-reset on-reset
-                         :all-sc-raw all-sc-raw}]
+                         :section-key section-key}]
 
       [:ul {:class (stl/css :subsection-menu)}
        (for [[sub-name sub-info] subsections]
@@ -558,20 +585,18 @@
 
             [:div {:style {:display (if visible? "initial" "none")}}
              [:> shortcut-row* {:elements (:children sub-info)
-                                :all-shortcuts all-shortcuts
                                 :filter-term filter-term
                                 :is-match-section is-match-section
                                 :is-match-subsection true
                                 :editable? editable?
-                                :all-sc-raw all-sc-raw
                                 :custom-shortcuts custom-shortcuts
-                                :on-reset on-reset}]]]))])))
+                                :section-key section-key}]]]))])))
 
 (mf/defc shortcut-section*
   [{:keys [section manage-sections open-sections filter-term
-           editable? custom-shortcuts all-shortcuts on-reset all-sc-raw]}]
+           editable? custom-shortcuts]}]
   (let [open-sections (normalize-open-sections open-sections)
-        [_ section-info] section
+        [section-key section-info] section
         section-id          (:id section-info)
         section-translation (:translation section-info)
         subsections         (:children section-info)
@@ -590,6 +615,4 @@
                                 :filter-term filter-term
                                 :editable? editable?
                                 :custom-shortcuts custom-shortcuts
-                                :all-shortcuts all-shortcuts
-                                :all-sc-raw all-sc-raw
-                                :on-reset on-reset}]]]))
+                                :section-key section-key}]]]))

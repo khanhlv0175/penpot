@@ -5090,11 +5090,7 @@ msgid "shortcut-subsection.edit"
 msgstr "Edit"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:60
-msgid "shortcut-subsection.general-dashboard"
-msgstr "Generic"
-
-#: src/app/main/ui/workspace/sidebar/shortcuts.cljs:61
-msgid "shortcut-subsection.general-viewer"
+msgid "shortcut-subsection.generic"
 msgstr "Generic"
 
 #: src/app/main/ui/workspace/main_menu.cljs:1005, src/app/main/ui/workspace/sidebar/shortcuts.cljs:62
@@ -5629,8 +5625,8 @@ msgid "shortcuts.no-personalized"
 msgstr "Head to All to start customizing your shortcuts."
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.no-not-assigned"
-msgstr "Your shortcuts are all set."
+msgid "shortcuts.no-disabled"
+msgstr "There are not disabled shortcuts"
 
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.no-shortcuts"
@@ -5641,12 +5637,8 @@ msgid "shortcuts.personalized"
 msgstr "Personalized"
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.not-assigned"
-msgstr "Not assigned"
-
-#: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.conflict"
-msgstr "Conflict"
+msgid "shortcuts.disabled"
+msgstr "Disabled"
 
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.import-export"

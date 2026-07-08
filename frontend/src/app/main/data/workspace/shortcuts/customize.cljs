@@ -12,24 +12,35 @@
    [potok.v2.core :as ptk]))
 
 (defn set-custom-shortcut
-  [shortcut-key new-command conflicting-key]
+  [shortcut-key new-command conflicting-key group-key]
   (ptk/reify ::set-custom-shortcut
     ptk/WatchEvent
     (watch [_ state _]
       (let [current-customs (get-in state [:profile :props :custom-shortcuts] {})
-            new-customs     (-> current-customs
-                                (assoc shortcut-key new-command)
-                                (cond-> conflicting-key (assoc conflicting-key "")))]
+            group-map       (get current-customs group-key)
+            group-map       (if (map? group-map) group-map {})
+            group-map       (assoc group-map shortcut-key new-command)
+            ;; clear conflicting shortcut in the same group
+            group-map       (if conflicting-key
+                              (assoc group-map conflicting-key "")
+                              group-map)
+            new-customs      (assoc current-customs group-key group-map)
+            _ (prn "group-key" group-key)]
         (rx/of (du/update-profile-props {:custom-shortcuts new-customs})
                (ds/rebind-shortcuts))))))
 
 (defn reset-custom-shortcut
-  [shortcut-key]
+  [shortcut-key group-key]
   (ptk/reify ::reset-custom-shortcut
     ptk/WatchEvent
     (watch [_ state _]
       (let [current-customs (get-in state [:profile :props :custom-shortcuts] {})
-            new-customs     (or (not-empty (dissoc current-customs shortcut-key)) {})]
+            group-map       (get current-customs group-key)
+            group-map       (if (map? group-map) group-map {})
+            group-map       (dissoc group-map shortcut-key)
+            new-customs      (if (empty? group-map)
+                               (dissoc current-customs group-key)
+                               (assoc current-customs group-key group-map))]
         (rx/of (du/update-profile-props {:custom-shortcuts new-customs})
                (ds/rebind-shortcuts))))))
 

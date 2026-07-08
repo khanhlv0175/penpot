@@ -717,7 +717,7 @@
    ;; THEME
    :toggle-theme         {:tooltip (ds/alt "M")
                           :command (ds/a-mod "m")
-                          :subsections [:basics]
+                          :subsections [:generic :basics]
                           :section [:workspace :basics]
                           :fn #(st/emit! (with-meta (du/toggle-theme)
                                            {::ev/origin "workspace:shortcut"}))}
@@ -726,7 +726,7 @@
    ;; PLUGINS
    :plugins               {:tooltip (ds/meta (ds/alt "P"))
                            :command (ds/c-mod "alt+p")
-                           :subsections [:basics]
+                           :subsections [:generic :basics]
                            :section [:workspace :basics]
                            :fn #(when (features/active-feature? @st/state "plugins/runtime")
                                   (st/emit!
@@ -761,7 +761,7 @@
   [shortcut]
   (assert (contains? shortcuts shortcut) (str shortcut))
   (let [custom-shortcuts (get-in @st/state [:profile :props :custom-shortcuts])
-        custom-command   (get custom-shortcuts shortcut)]
+        custom-command   (get-in custom-shortcuts [:workspace shortcut])]
     (if (and custom-command (not= custom-command ""))
       (ds/command->tooltip custom-command)
       (get-in shortcuts [shortcut :tooltip]))))
@@ -771,7 +771,7 @@
   custom-shortcuts map. Use this when you already have the custom
   shortcuts derefed for the current render cycle."
   [shortcut custom-shortcuts]
-  (let [custom-command (get custom-shortcuts shortcut)]
+  (let [custom-command (get-in custom-shortcuts [:workspace shortcut])]
     (if (and custom-command (not= custom-command ""))
       (ds/command->tooltip custom-command)
       (get-in shortcuts [shortcut :tooltip]))))

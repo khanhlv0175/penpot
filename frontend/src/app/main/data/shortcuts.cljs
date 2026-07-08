@@ -150,19 +150,20 @@
       (str/join "" (map display-part parts)))))
 
 (defn apply-custom-overrides
-  [shortcuts custom-overrides]
-  (if (empty? custom-overrides)
-    shortcuts
-    (reduce-kv
-     (fn [acc sc-key new-command]
-       (if (and (contains? acc sc-key)
-                (not (:disabled (get acc sc-key))))
-         (-> acc
-             (assoc-in [sc-key :command] new-command)
-             (update sc-key dissoc :show-command))
-         acc))
-     shortcuts
-     custom-overrides)))
+  [shortcuts custom-overrides group-key]
+  (let [group-overrides (get custom-overrides group-key)]
+    (if (empty? group-overrides)
+      shortcuts
+      (reduce-kv
+       (fn [acc sc-key new-command]
+         (if (and (contains? acc sc-key)
+                  (not (:disabled (get acc sc-key))))
+           (-> acc
+               (assoc-in [sc-key :command] new-command)
+               (update sc-key dissoc :show-command))
+           acc))
+       shortcuts
+       group-overrides))))
 
 (defn build-command-index
   [shortcuts]
@@ -225,19 +226,34 @@
   (fnil conj (d/ordered-map)))
 
 (defn push-shortcuts
-  [key shortcuts]
+  [key shortcuts group-key & {:keys [merge-shortcuts]}]
   (assert (keyword? key) "expected a keyword for `key`")
   (let [shortcuts (check-shortcuts shortcuts)]
     (ptk/reify ::push-shortcuts
       ptk/UpdateEvent
       (update [_ state]
-        (update state :shortcuts conj* [key shortcuts]))
+        (let [custom-overrides (get-in state [:profile :props :custom-shortcuts])
+              group-key        (or group-key (:shortcuts-group-key state))
+              merge-sc         (cond
+                                 (= merge-shortcuts :auto)
+                                 (let [[_ sc] (last (:shortcuts state))]
+                                   sc)
+
+                                 (map? merge-shortcuts)
+                                 merge-shortcuts)
+
+              effective        (cond-> shortcuts
+                                 merge-sc
+                                 (merge merge-sc))
+              effective        (apply-custom-overrides effective custom-overrides group-key)]
+          (-> state
+              (update :shortcuts conj* [key effective])
+              (assoc :shortcuts-group-key group-key))))
 
       ptk/EffectEvent
       (effect [_ state _]
-        (let [custom-overrides (get-in state [:profile :props :custom-shortcuts])
-              effective        (apply-custom-overrides shortcuts custom-overrides)]
-          (reset! effective))))))
+        (let [[_ stored] (last (:shortcuts state))]
+          (reset! stored))))))
 
 (defn pop-shortcuts
   [key]
@@ -251,7 +267,8 @@
     (effect [_ state _]
       (let [[_key shortcuts] (last (:shortcuts state))
             custom-overrides (get-in state [:profile :props :custom-shortcuts])
-            effective        (apply-custom-overrides shortcuts custom-overrides)]
+            group-key        (:shortcuts-group-key state)
+            effective        (apply-custom-overrides shortcuts custom-overrides group-key)]
         (reset! effective)))))
 
 (defn rebind-shortcuts
@@ -261,6 +278,7 @@
     (effect [_ state _]
       (let [[_key shortcuts] (last (:shortcuts state))
             custom-overrides (get-in state [:profile :props :custom-shortcuts])
-            effective        (apply-custom-overrides shortcuts custom-overrides)]
+            group-key        (:shortcuts-group-key state)
+            effective        (apply-custom-overrides shortcuts custom-overrides group-key)]
         (when shortcuts
           (reset! effective))))))

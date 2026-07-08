@@ -61,7 +61,7 @@
    [:notifications {:optional true} schema:props-notifications]
    [:workspace-visited {:optional true} ::sm/boolean]
    [:custom-shortcuts {:optional true}
-    [:map-of {:gen/max 10} :keyword :string]]])
+    [:map-of {:gen/max 10} :keyword [:map-of :keyword :string]]]])
 
 (def schema:profile
   [:map {:title "Profile"}

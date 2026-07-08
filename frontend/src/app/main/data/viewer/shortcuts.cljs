@@ -7,6 +7,8 @@
 (ns app.main.data.viewer.shortcuts
   (:require
    [app.main.data.common :as dcm]
+   [app.main.data.event :as ev]
+   [app.main.data.profile :as du]
    [app.main.data.shortcuts :as ds]
    [app.main.data.viewer :as dv]
    [app.main.store :as st]))
@@ -18,6 +20,13 @@
                         :section [:viewer]
                         :fn #(st/emit! dv/increase-zoom)}
 
+   :toggle-theme    {:tooltip (ds/alt "M")
+                     :command (ds/a-mod "m")
+                     :section [:viewer]
+                     :subsections [:generic]
+                     :fn #(st/emit! (with-meta (du/toggle-theme)
+                                      {::ev/origin "viewer:shortcuts"}))}
+
    :decrease-zoom      {:tooltip "-"
                         :command "-"
                         :section [:viewer]
@@ -27,7 +36,7 @@
    :select-all         {:tooltip (ds/meta "A")
                         :command (ds/c-mod "a")
                         :section [:viewer]
-                        :subsections [:general-viewer]
+                        :subsections [:generic]
                         :fn #(st/emit! (dv/select-all))}
 
    :reset-zoom         {:tooltip (ds/shift "0")
@@ -50,13 +59,13 @@
 
    :prev-frame         {:tooltip ds/left-arrow
                         :command ["left" "up" "shift+enter" "pageup" "shift+space"]
-                        :subsections [:general-viewer]
+                        :subsections [:generic]
                         :section [:viewer]
                         :fn #(st/emit! dv/select-prev-frame)}
 
    :next-frame         {:tooltip ds/right-arrow
                         :command ["right" "down" "enter" "pagedown" "space"]
-                        :subsections [:general-viewer]
+                        :subsections [:generic]
                         :section [:viewer]
                         :fn #(st/emit! dv/select-next-frame)}
 

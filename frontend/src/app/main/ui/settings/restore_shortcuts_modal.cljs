@@ -66,7 +66,7 @@
           [:th {:class (stl/css :shortcut-header-command)}
            (tr "labels.default")]]]
         [:tbody {:class (stl/css :shortcuts-list-body)}
-         (for [shortcut-key (keys custom-shortcuts)]
+         (for [shortcut-key (keys (get custom-shortcuts :workspace {}))]
            (let [default-command (:command (get workspace-shortcuts-raw shortcut-key))
 
                  default-managed-list    (if (coll? default-command)
@@ -83,7 +83,8 @@
 
                  default-penultimate     (last default-short-char-list)
 
-                 current-command (or (get custom-shortcuts shortcut-key) default-command)
+                 ws-customs              (get custom-shortcuts :workspace {})
+                 current-command         (or (get ws-customs shortcut-key) default-command)
 
                  current-managed-list    (if (coll? current-command)
                                            current-command

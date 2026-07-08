@@ -7,24 +7,14 @@
 (ns app.main.data.workspace.path.shortcuts
   (:require
    [app.main.data.shortcuts :as ds]
-   [app.main.data.workspace :as dw]
    [app.main.data.workspace.path :as drp]
-   [app.main.store :as st]
-   [beicon.v2.core :as rx]
-   [potok.v2.core :as ptk]))
+   [app.main.store :as st]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Shortcuts
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Shortcuts format https://github.com/ccampbell/mousetrap
-
-(defn esc-pressed []
-  (ptk/reify ::esc-pressed
-    ptk/WatchEvent
-    (watch [_ _ _]
-      ;; Not interrupt when we're editing a path
-      (rx/of :interrupt))))
 
 (def shortcuts
   {:move-nodes      {:tooltip "M"
@@ -87,48 +77,6 @@
                      :subsections [:path-editor]
                      :section [:workspace]
                      :fn #(st/emit! (drp/toggle-snap))}
-
-   :escape          {:tooltip (ds/esc)
-                     :command ["escape" "enter" "v"]
-                     :section [:workspace]
-                     :fn #(st/emit! (esc-pressed))}
-
-   :undo            {:tooltip (ds/meta "Z")
-                     :command (ds/c-mod "z")
-                     :section [:workspace]
-                     :fn #(st/emit! (drp/undo-path))}
-
-   :redo            {:tooltip (ds/meta "Y")
-                     :command [(ds/c-mod "shift+z") (ds/c-mod "y")]
-                     :section [:workspace]
-                     :fn #(st/emit! (drp/redo-path))}
-
-   ;; ZOOM
-
-   :increase-zoom   {:tooltip "+"
-                     :command "+"
-                     :section [:workspace]
-                     :fn #(st/emit! (dw/increase-zoom nil))}
-
-   :decrease-zoom   {:tooltip "-"
-                     :command "-"
-                     :section [:workspace]
-                     :fn #(st/emit! (dw/decrease-zoom nil))}
-
-   :reset-zoom      {:tooltip (ds/shift "0")
-                     :command "shift+0"
-                     :section [:workspace]
-                     :fn #(st/emit! dw/reset-zoom)}
-
-   :fit-all         {:tooltip (ds/shift "1")
-                     :command "shift+1"
-                     :section [:workspace]
-                     :fn #(st/emit! dw/zoom-to-fit-all)}
-
-   :zoom-selected   {:tooltip (ds/shift "2")
-                     :command "shift+2"
-                     :section [:workspace]
-                     :fn #(st/emit! dw/zoom-to-selected-shape)}
 
    ;; Arrow movement
 

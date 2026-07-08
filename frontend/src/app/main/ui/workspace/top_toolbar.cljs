@@ -336,18 +336,12 @@
         (mf/use-fn
          (fn [event]
            (dom/blur! (dom/get-target event))
-           (st/emit! (dwc/toggle-toolbar-visibility))))
-
-        get-tt           #(sc/get-effective-tooltip % custom-shortcuts)
-        test-tooltip-board-text
-        (if (not (:workspace-visited props))
-          (tr "workspace.toolbar.frame-first-time" (get-tt :draw-frame))
-          (tr "workspace.toolbar.frame" (get-tt :draw-frame)))]
+           (st/emit! (dwc/toggle-toolbar-visibility))))]
 
     (when-not ^boolean read-only?
       [:div {:role "toolbar"
              :aria-label (tr "workspace.toolbar.label")
-             :tabindex "0"
+             :tabIndex "0"
              :class (stl/css-case :toolbar true
                                   :no-rulers (not rulers-enabled)
                                   :hidden toolbar-hidden)}

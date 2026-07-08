@@ -39,7 +39,7 @@
   (let [section (get-in route [:data :name])
         profile (mf/deref refs/profile)]
 
-    (hooks/use-shortcuts ::dashboard sc/shortcuts)
+    (hooks/use-shortcuts ::dashboard sc/shortcuts :dashboard)
 
     (mf/with-effect [profile]
       (when (nil? profile)

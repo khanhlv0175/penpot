@@ -18,7 +18,7 @@
   {:toggle-theme    {:tooltip (ds/alt "M")
                      :command (ds/a-mod "m")
                      :section [:dashboard]
-                     :subsections [:general-dashboard]
+                     :subsections [:generic]
                      :fn #(st/emit! (with-meta (du/toggle-theme)
                                       {::ev/origin "dashboard:shortcuts"}))}})
 
@@ -46,7 +46,7 @@
   {:create-new-project {:tooltip "+"
                         :command "+"
                         :section [:dashboard]
-                        :subsections [:general-dashboard]
+                        :subsections [:generic]
                         :fn #(st/emit! (dd/create-element))}})
 
 ;; Shortcuts combinations for files, drafts, libraries and fonts sections

@@ -10,11 +10,11 @@
    [app.main.data.viewer.shortcuts]
    [app.main.data.workspace.path.shortcuts]
    [app.main.data.workspace.shortcuts]
-   [app.main.data.workspace.shortcuts.customize :as customize]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
    [app.main.ui.components.search-bar :refer [search-bar*]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.foundations.typography :as t]
@@ -80,7 +80,7 @@
          set)))
 
 (mf/defc shortcuts-list*
-  [{:keys [shortcuts all-shortcuts all-sc-raw open-sections filter-term custom-shortcuts editable? manage-sections on-reset]}]
+  [{:keys [shortcuts open-sections filter-term custom-shortcuts editable? manage-sections]}]
   (let [sections (keep (fn [section]
                          (when (seq (get-in section [1 :children]))
                            section))
@@ -90,18 +90,16 @@
        (let [[section-key _] section]
          [:> ss/shortcut-section* {:key (name section-key)
                                    :section section
-                                   :all-sc-raw all-sc-raw
                                    :manage-sections manage-sections
                                    :open-sections open-sections
                                    :filter-term filter-term
                                    :editable? editable?
-                                   :custom-shortcuts custom-shortcuts
-                                   :all-shortcuts all-shortcuts
-                                   :on-reset on-reset}]))]))
+                                   :custom-shortcuts custom-shortcuts}]))]))
 
 (mf/defc shortcuts-tab-section*
-  [{:keys [all-shortcuts all-sc-raw shortcut-filter show-restore-all? on-restore-all empty-str custom-shortcuts]}]
-  (let [open-sections*   (mf/use-state [[1]])
+  [{:keys [shortcut-filter show-restore-all? on-restore-all empty-str custom-shortcuts]}]
+  (let [{:keys [all-shortcuts]} (mf/use-ctx ctx/shortcuts-ctx)
+        open-sections*   (mf/use-state [[0]])
         open-sections    (deref open-sections*)
 
         filter-term*     (mf/use-state "")
@@ -138,11 +136,6 @@
            (reset! open-sections* [[1]])
            (reset! filter-term* "")))
 
-        on-reset-shortcut
-        (mf/use-fn
-         (fn [shortcut-key]
-           (st/emit! (customize/reset-custom-shortcut shortcut-key))))
-
         manage-sections
         (fn [item]
           (fn [event]
@@ -159,17 +152,14 @@
                           :on-search-clear-click on-search-clear-click
                           :on-restore-all on-restore-all
                           :show-restore-all? show-restore-all?
-                          :has-custom-shortcuts (seq custom-shortcuts)}]
+                          :has-custom-shortcuts (some #(seq (val %)) custom-shortcuts)}]
      (if (seq filtered-shortcuts)
        [:> shortcuts-list* {:shortcuts filtered-shortcuts
-                            :all-shortcuts all-shortcuts
-                            :all-sc-raw all-sc-raw
                             :open-sections effective-open-sections
                             :filter-term filter-term*
                             :custom-shortcuts custom-shortcuts
                             :editable? true
-                            :manage-sections manage-sections
-                            :on-reset on-reset-shortcut}]
+                            :manage-sections manage-sections}]
 
        [:> empty-state* {:text empty-str
                          :class (stl/css :shortcuts-empty-state)}])]))
@@ -203,9 +193,9 @@
            {:label (tr "shortcuts.personalized")
             :data-testid "personalized"
             :id "personalized"}
-           {:label (tr "shortcuts.not-assigned")
-            :data-testid "not-assigned"
-            :id "not-assigned"}])
+           {:label (tr "shortcuts.disabled")
+            :data-testid "disabled"
+            :id "disabled"}])
 
         handle-change-tab
         (mf/use-fn
@@ -214,34 +204,44 @@
 
         custom-shortcuts           (get-in profile [:props :custom-shortcuts])
 
-        path-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.path.shortcuts/shortcuts custom-shortcuts)
-        path-shortcuts        (->> path-shortcuts-custom
-                                        (ss/add-translation :sc)
-                                        (into {}))
+        path-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.path.shortcuts/shortcuts custom-shortcuts :path)
+        path-shortcuts-with-translation        (->> path-shortcuts-custom
+                                                    (ss/add-translation :sc)
+                                                    (into {}))
 
-        workspace-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.shortcuts/shortcuts custom-shortcuts)
+        workspace-shortcuts-custom (ds/apply-custom-overrides app.main.data.workspace.shortcuts/shortcuts custom-shortcuts :workspace)
 
-        workspace-shortcuts        (->> workspace-shortcuts-custom
-                                        (ss/add-translation :sc)
-                                        (into {}))
+        workspace-shortcuts-with-translation        (->> workspace-shortcuts-custom
+                                                         (ss/add-translation :sc)
+                                                         (into {}))
 
-        dashboard-shortcuts-custom (ds/apply-custom-overrides app.main.data.dashboard.shortcuts/shortcuts custom-shortcuts)
+        dashboard-shortcuts-custom (ds/apply-custom-overrides app.main.data.dashboard.shortcuts/shortcuts custom-shortcuts :dashboard)
 
-        dashboard-shortcuts        (->> dashboard-shortcuts-custom
-                                        (ss/add-translation :sc)
-                                        (into {}))
+        dashboard-shortcuts-with-translation        (->> dashboard-shortcuts-custom
+                                                         (ss/add-translation :sc)
+                                                         (into {}))
 
-        viewer-shortcuts-custom    (ds/apply-custom-overrides app.main.data.viewer.shortcuts/shortcuts custom-shortcuts)
+        viewer-shortcuts-custom    (ds/apply-custom-overrides app.main.data.viewer.shortcuts/shortcuts custom-shortcuts :viewer)
 
-        viewer-shortcuts           (->> viewer-shortcuts-custom
-                                        (ss/add-translation :sc)
-                                        (into {}))
+        viewer-shortcuts-with-translation           (->> viewer-shortcuts-custom
+                                                         (ss/add-translation :sc)
+                                                         (into {}))
 
-        all-shortcuts-raw (merge workspace-shortcuts-custom path-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
+        all-shortcuts-raw (d/deep-merge workspace-shortcuts-custom path-shortcuts-custom dashboard-shortcuts-custom viewer-shortcuts-custom)
 
         {:keys [all-shortcuts]}
         (ss/build-all-shortcuts-without-basics
-         workspace-shortcuts  path-shortcuts dashboard-shortcuts viewer-shortcuts)
+         workspace-shortcuts-with-translation
+         path-shortcuts-with-translation
+         dashboard-shortcuts-with-translation
+         viewer-shortcuts-with-translation)
+
+        shortcuts-ctx-value
+        {:workspace-sc-trans (d/deep-merge workspace-shortcuts-with-translation path-shortcuts-with-translation)
+         :dashboard-sc-trans dashboard-shortcuts-with-translation
+         :viewer-sc-trans viewer-shortcuts-with-translation
+         :all-shortcuts all-shortcuts
+         :all-sc-raw all-shortcuts-raw}
 
         on-restore-all
         (mf/use-fn
@@ -295,48 +295,51 @@
                     :class (stl/css :page-title)}
        (tr "label.shortcuts")]
 
-      [:div {:class (stl/css :shortcuts-content)}
-       [:> tab-switcher* {:tabs tabs
-                          :selected (name section)
-                          :on-change handle-change-tab
-                          :class (stl/css :shortcuts-switcher)}
-        (case section
-          :all
-          [:> shortcuts-tab-section* {:all-shortcuts all-shortcuts
-                                      :all-sc-raw all-shortcuts-raw
-                                      :shortcut-filter (fn [_ shortcut search-term]
-                                                         (or (str/blank? search-term)
-                                                             (matches-search (:translation shortcut) search-term)))
-                                      :show-restore-all? true
-                                      :empty-str (tr "shortcuts.no-shortcuts")
-                                      :on-restore-all on-restore-all
-                                      :custom-shortcuts custom-shortcuts}]
+      [:> (mf/provider ctx/shortcuts-ctx) {:value shortcuts-ctx-value}
+       [:div {:class (stl/css :shortcuts-content)}
+        [:> tab-switcher* {:tabs tabs
+                           :selected (name section)
+                           :on-change handle-change-tab
+                           :class (stl/css :shortcuts-switcher)}
+         (case section
+           :all
+           [:> shortcuts-tab-section* {:shortcut-filter (fn [_ shortcut search-term]
+                                                          (or (str/blank? search-term)
+                                                              (matches-search (:translation shortcut) search-term)))
+                                       :show-restore-all? true
+                                       :empty-str (tr "shortcuts.no-shortcuts")
+                                       :on-restore-all on-restore-all
+                                       :custom-shortcuts custom-shortcuts}]
 
-          :personalized
-          [:> shortcuts-tab-section* {:all-shortcuts all-shortcuts
-                                      :all-sc-raw all-shortcuts-raw
-                                      :shortcut-filter (fn [shortcut-key shortcut search-term]
-                                                         (and (some? (get custom-shortcuts shortcut-key))
-                                                              (not (str/blank? (get custom-shortcuts shortcut-key)))
-                                                              (or (str/blank? search-term)
-                                                                  (matches-search (:translation shortcut) search-term))))
-                                      :show-restore-all? true
-                                      :empty-str (tr "shortcuts.no-personalized")
-                                      :on-restore-all on-restore-all
-                                      :custom-shortcuts custom-shortcuts}]
+           :personalized
+           [:> shortcuts-tab-section* {:shortcut-filter (fn [shortcut-key shortcut search-term]
+                                                          (let [shortcut-group (first (:section shortcut))
+                                                                group-map (get custom-shortcuts shortcut-group)
+                                                                group-map (if (map? group-map) group-map {})
+                                                                customized? (and (contains? group-map shortcut-key)
+                                                                                 (not (str/blank? (get group-map shortcut-key))))]
+                                                            (and customized?
+                                                                 (or (str/blank? search-term)
+                                                                     (matches-search (:translation shortcut) search-term)))))
+                                       :show-restore-all? true
+                                       :empty-str (tr "shortcuts.no-personalized")
+                                       :on-restore-all on-restore-all
+                                       :custom-shortcuts custom-shortcuts}]
 
-          :not-assigned
-          [:> shortcuts-tab-section* {:all-shortcuts all-shortcuts
-                                      :all-sc-raw all-shortcuts-raw
-                                      :shortcut-filter (fn [shortcut-key shortcut search-term]
-                                                         (and (contains? custom-shortcuts shortcut-key)
-                                                              (str/blank? (get custom-shortcuts shortcut-key))
-                                                              (or (str/blank? search-term)
-                                                                  (matches-search (:translation shortcut) search-term))))
-                                      :show-restore-all? true
-                                      :empty-str (tr "shortcuts.no-not-assigned")
-                                      :on-restore-all on-restore-all
-                                      :custom-shortcuts custom-shortcuts}])]
+           :disabled
+           [:> shortcuts-tab-section* {:shortcut-filter (fn [shortcut-key shortcut search-term]
+                                                          (let [shortcut-group (first (:section shortcut))
+                                                                group-map (get custom-shortcuts shortcut-group)
+                                                                group-map (if (map? group-map) group-map {})
+                                                                in-group? (contains? group-map shortcut-key)
+                                                                blank? (str/blank? (get group-map shortcut-key))]
+                                                            (and in-group? blank?
+                                                                 (or (str/blank? search-term)
+                                                                     (matches-search (:translation shortcut) search-term)))))
+                                       :show-restore-all? true
+                                       :empty-str (tr "shortcuts.no-disabled")
+                                       :on-restore-all on-restore-all
+                                       :custom-shortcuts custom-shortcuts}])]]
 
        [:div {:class (stl/css :shortcuts-page-footer)}
         [:div {:class (stl/css :shortcuts-info)}
@@ -347,23 +350,16 @@
            (tr "shortcuts.personalized")]]
 
          [:div {:class (stl/css :shortcuts-info-wrapper)}
-          [:div {:class (stl/css :dot-wrapper)}
-           [:div {:class (stl/css :shortcuts-conflict-dot)}]]
-          [:p {:class (stl/css :shortcuts-text)}
-           (tr "shortcuts.conflict")]]
-
-         [:div {:class (stl/css :shortcuts-info-wrapper)}
           [:> icon* {:class (stl/css :shortcuts-not-assigned-icon)
                      :icon-id i/broken-link}]
           [:p {:class (stl/css :shortcuts-text)}
-           (tr "shortcuts.not-assigned")]]]
+           (tr "shortcuts.disabled")]]]
 
         [:div {:class (stl/css :export-wrapper)}
 
          [:> button* {:variant "secondary"
                       :on-click open-menu
-                      :icon i/import-export
-                      :icon-size "m"}
+                      :icon i/import-export}
           (tr "shortcuts.import-export")]
          [:> dropdown-menu* {:show show-menu?
                              :on-close close-menu

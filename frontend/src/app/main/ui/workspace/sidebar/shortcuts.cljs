@@ -29,29 +29,27 @@
    [clojure.set :as set]
    [rumext.v2 :as mf]))
 
-(def ^:private workspace-shortcuts-raw
-  (d/deep-merge app.main.data.workspace.path.shortcuts/shortcuts
-                app.main.data.workspace.shortcuts/shortcuts))
 
 (mf/defc shortcuts-container*
   [{:keys [class]}]
   (let [profile                      (mf/deref refs/profile)
         custom-shortcuts             (get-in profile [:props :custom-shortcuts])
 
-        workspace-shortcuts-custom   (ds/apply-custom-overrides workspace-shortcuts-raw custom-shortcuts)
+        path-shortcuts-custom        (ds/apply-custom-overrides app.main.data.workspace.path.shortcuts/shortcuts custom-shortcuts :path)
 
-        all-workspace-shortcuts      (->> workspace-shortcuts-custom
+        workspace-shortcuts-custom   (ds/apply-custom-overrides app.main.data.workspace.shortcuts/shortcuts custom-shortcuts :workspace)
+
+        workspace-shortcuts          (->> (d/deep-merge path-shortcuts-custom workspace-shortcuts-custom)
                                           (ss/add-translation :sc)
                                           (into {}))
 
-        dashboard-shortcuts-custom     (ds/apply-custom-overrides app.main.data.dashboard.shortcuts/shortcuts custom-shortcuts)
 
+        dashboard-shortcuts-custom   (ds/apply-custom-overrides app.main.data.dashboard.shortcuts/shortcuts custom-shortcuts :dashboard)
         dashboard-shortcuts          (->> dashboard-shortcuts-custom
                                           (ss/add-translation :sc)
                                           (into {}))
 
-        viewer-shortcuts-custom     (ds/apply-custom-overrides app.main.data.viewer.shortcuts/shortcuts custom-shortcuts)
-
+        viewer-shortcuts-custom      (ds/apply-custom-overrides app.main.data.viewer.shortcuts/shortcuts custom-shortcuts :viewer)
         viewer-shortcuts             (->> viewer-shortcuts-custom
                                           (ss/add-translation :sc)
                                           (into {}))
@@ -62,7 +60,7 @@
         close-fn                     #(st/emit! (dw/toggle-layout-flag :shortcuts))
 
         {:keys [all-shortcuts all-sc-names all-sub-names all-section-names]}
-        (ss/build-all-shortcuts all-workspace-shortcuts dashboard-shortcuts viewer-shortcuts)
+        (ss/build-all-shortcuts workspace-shortcuts dashboard-shortcuts viewer-shortcuts)
 
         all-item-names              (concat all-sc-names all-sub-names all-section-names)
         match-any?                  (some #(matches-search % @filter-term) all-item-names)
@@ -147,8 +145,7 @@
                                       :open-sections open-sections
                                       :filter-term filter-term
                                       :editable? false
-                                      :custom-shortcuts custom-shortcuts
-                                      :all-shortcuts all-workspace-shortcuts}]))]
+                                      :custom-shortcuts custom-shortcuts}]))]
        [:div {:class (stl/css :not-found)} (tr "shortcuts.not-found")])
      [:> bl/button-link* {:on-click go-to-edit-shortcuts
                           :label (tr "shortcuts.edit-on-settings")

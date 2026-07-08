@@ -146,6 +146,6 @@
   [:section {:class (stl/css :dashboard-settings)
              :aria-labelledby "profile-section-title"}
    [:div {:class (stl/css :form-container)}
-    [:h2 {:id "profile-section-title" }(tr "labels.profile")]
+    [:h2 {:id "profile-section-title"} (tr "labels.profile")]
     [:> profile-photo-form*]
     [:> profile-form*]]])

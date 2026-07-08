@@ -4935,7 +4935,7 @@ msgstr "Básicos"
 
 #: src/app/main/ui/shortcuts.cljs
 msgid "shortcut-section.path"
-msgstr "Modo eidición de rutas"
+msgstr "Modo edición de rutas"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:418
 msgid "shortcut-section.dashboard"
@@ -4959,11 +4959,7 @@ msgid "shortcut-subsection.edit"
 msgstr "Editar"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:60
-msgid "shortcut-subsection.general-dashboard"
-msgstr "Genérico"
-
-#: src/app/main/ui/workspace/sidebar/shortcuts.cljs:61
-msgid "shortcut-subsection.general-viewer"
+msgid "shortcut-subsection.generic"
 msgstr "Genérico"
 
 #: src/app/main/ui/workspace/main_menu.cljs:1005, src/app/main/ui/workspace/sidebar/shortcuts.cljs:62
@@ -5486,8 +5482,8 @@ msgid "shortcuts.no-personalized"
 msgstr "Dirígete a TODO para personalizar tus atajos."
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.no-not-assigned"
-msgstr "Todos tus atajos estan todos asignados."
+msgid "shortcuts.no-disabled"
+msgstr "No hay atajos deshabilitados."
 
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.no-shortcuts"
@@ -5498,12 +5494,8 @@ msgid "shortcuts.personalized"
 msgstr "Personalizados"
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.not-assigned"
-msgstr "Sin asignar"
-
-#: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.conflict"
-msgstr "Con conflicto"
+msgid "shortcuts.disabled"
+msgstr "Deshabilitado"
 
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.import-export"
