@@ -158,26 +158,11 @@
   [type item]
   (map (fn [[k v]] [k (assoc v :translation (translation-keyname type k))]) item))
 
-(def ^:private subsection-order
-  [:alignment
-   :edit
-   :generic
-   :main-menu
-   :modify-layers
-   :navigation-dashboard
-   :navigation-workspace
-   :navigation-viewer
-   :panels
-   :path-editor
-   :text-editor
-   :tools
-   :zoom-workspace
-   :zoom-viewer])
-
 (defn shortcuts->subsections
   [shortcuts]
   (let [subsections (into #{} (mapcat :subsections) (vals shortcuts))
-        subsections (sort-by (fn [s] (.indexOf subsection-order s)) subsections)
+        subsections (vec (sort-by name subsections))
+        _ (prn "subsections" subsections)
         get-sc-by-subsection
         (fn [subsection [k v]]
           (when (some #(= subsection %) (:subsections v)) {k v}))
@@ -185,28 +170,34 @@
         (fn [acc subsection]
           (let [shortcuts-by-subsection (into {} (keep (partial get-sc-by-subsection subsection) shortcuts))]
             (assoc acc subsection {:children shortcuts-by-subsection})))]
-    (reduce reduce-sc {} subsections)))
+    (reduce reduce-sc (sorted-map-by (fn [a b] (compare (name a) (name b)))) subsections)))
 
 (defn build-all-shortcuts
   [workspace-sc dashboard-sc viewer-sc]
   (let [walk (fn walk [element parent-id]
                (if (nil? element)
                  element
-                 (let [rec-fn (fn [index [k item]]
+                  (let [sorted-comp (when (sorted? element)
+                                      #(compare (name %1) (name %2)))
+                       rec-fn (fn [index [k item]]
                                 (let [item-id (if (nil? parent-id)
                                                 [index]
                                                 (conj parent-id index))]
                                   [k (assoc item :id item-id :children (walk (:children item) item-id))]))]
-                   (into {} (map-indexed (partial rec-fn) element)))))
+                   (if sorted-comp
+                     (into (sorted-map-by sorted-comp) (map-indexed (partial rec-fn) element))
+                     (into {} (map-indexed (partial rec-fn) element))))))
+        sorted-map-fn #(sorted-map-by (fn [a b] (compare (name a) (name b))))
         ws-subs (->> (shortcuts->subsections workspace-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
+
         db-subs (->> (shortcuts->subsections dashboard-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
         vw-subs (->> (shortcuts->subsections viewer-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
         basics  (into {} (concat (:children (:basics ws-subs))
                                  (:children (:basics db-subs))
                                  (:children (:basics vw-subs))))
@@ -245,37 +236,42 @@
   (let [walk (fn walk [element parent-id]
                (if (nil? element)
                  element
-                 (let [rec-fn (fn [index [k item]]
+                  (let [sorted-comp (when (sorted? element)
+                                      #(compare (name %1) (name %2)))
+                       rec-fn (fn [index [k item]]
                                 (let [item-id (if (nil? parent-id)
                                                 [index]
                                                 (conj parent-id index))]
                                   [k (assoc item :id item-id :children (walk (:children item) item-id))]))]
-                   (into {} (map-indexed (partial rec-fn) element)))))
+                   (if sorted-comp
+                     (into (sorted-map-by sorted-comp) (map-indexed (partial rec-fn) element))
+                     (into {} (map-indexed (partial rec-fn) element))))))
+        sorted-map-fn #(sorted-map-by (fn [a b] (compare (name a) (name b))))
         ws-subs (->> (shortcuts->subsections workspace-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
+
         pt-subs (->> (shortcuts->subsections path-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
         db-subs (->> (shortcuts->subsections dashboard-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
         vw-subs (->> (shortcuts->subsections viewer-sc)
                      (add-translation :sub-sec)
-                     (into {}))
+                     (into (sorted-map-fn)))
         ws-subs  (dissoc ws-subs :basics)
+        pt-subs  (dissoc pt-subs :basics)
         db-subs  (dissoc db-subs :basics)
         vw-subs  (dissoc vw-subs :basics)
+        ws-subs  (merge ws-subs pt-subs)
         all      {:workspace {:id [1]
                               :children ws-subs
                               :translation (tr "shortcut-section.workspace")}
-                  :path      {:id [2]
-                              :children pt-subs
-                              :translation (tr "shortcut-section.path")}
-                  :dashboard {:id [3]
+                  :dashboard {:id [2]
                               :children db-subs
                               :translation (tr "shortcut-section.dashboard")}
-                  :viewer    {:id [4]
+                  :viewer    {:id [3]
                               :children vw-subs
                               :translation (tr "shortcut-section.viewer")}}
         all      (walk all nil)
@@ -286,7 +282,6 @@
                                   (keys viewer-sc)))
         all-sub-names (map #(translation-keyname :sub-sec %)
                            (concat (keys ws-subs)
-                                   (keys pt-subs)
                                    (keys db-subs)
                                    (keys vw-subs)))
         all-section-names (map #(translation-keyname :sec %) (keys all))]

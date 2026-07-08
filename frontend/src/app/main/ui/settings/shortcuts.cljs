@@ -49,19 +49,23 @@
 
 (defn- filter-shortcuts-tree
   [tree shortcut-filter search-term]
-  (into {}
-        (keep (fn [[k node]]
-                (let [children (:children node)]
-                  (cond
-                    (map? children)
-                    (let [filtered-children
-                          (filter-shortcuts-tree children shortcut-filter search-term)]
-                      (when (seq filtered-children)
-                        [k (assoc node :children filtered-children)]))
+  (let [sorted-comp (when (sorted? tree)
+                      #(compare (name %1) (name %2)))
+        result (keep (fn [[k node]]
+                       (let [children (:children node)]
+                         (cond
+                           (map? children)
+                           (let [filtered-children
+                                 (filter-shortcuts-tree children shortcut-filter search-term)]
+                             (when (seq filtered-children)
+                               [k (assoc node :children filtered-children)]))
 
-                    (shortcut-filter k node search-term)
-                    [k node]))))
-        tree))
+                           (shortcut-filter k node search-term)
+                           [k node])))
+                     tree)]
+    (if sorted-comp
+      (into (sorted-map-by sorted-comp) result)
+      (into {} result))))
 
 (defn- collect-open-section-ids
   [tree]
