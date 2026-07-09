@@ -89,7 +89,8 @@
                          (when (seq (get-in section [1 :children]))
                            section))
                        shortcuts)]
-    [:div {:class (stl/css :shortcuts-list)}
+    [:div {:class (stl/css :shortcuts-list)
+           :aria-label (tr "shortcuts.title")}
      (for [section sections]
        (let [[section-key _] section]
          [:> ss/shortcut-section* {:key (name section-key)
@@ -300,7 +301,7 @@
     [:section {:class (stl/css :shortcuts-page)
                :aria-label (tr "shortcuts.page")}
      [:div {:class (stl/css :shortcuts-content)}
-      [:> heading* {:level 1
+      [:> heading* {:level 2
                     :typography t/title-large
                     :class (stl/css :page-title)}
        (tr "label.shortcuts")]

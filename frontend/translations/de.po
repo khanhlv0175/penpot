@@ -4143,10 +4143,6 @@ msgstr "Arbeitsbereich"
 msgid "shortcut-subsection.alignment"
 msgstr "Ausrichtung"
 
-#: src/app/main/ui/workspace/sidebar/shortcuts.cljs:59
-msgid "shortcut-subsection.edit"
-msgstr "Bearbeiten"
-
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:60
 msgid "shortcut-subsection.generic"
 msgstr "Allgemein"

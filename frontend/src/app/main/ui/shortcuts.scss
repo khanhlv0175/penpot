@@ -15,6 +15,10 @@
   margin: 0;
 }
 
+.section-header {
+  padding: 0;
+}
+
 .shortcuts-list {
   display: flex;
   flex-direction: column;
@@ -34,6 +38,8 @@
   padding: var(--sp-s) 0;
   color: var(--color-foreground-secondary);
   cursor: pointer;
+  border: none;
+  background: none;
 
   .subsection-name,
   .section-name {

@@ -471,16 +471,22 @@
 
 
     [:li {:class (stl/css-case :shortcuts-name-editable true
-                               :shortcuts-editing is-editing
-                               :customized customized?)
+                                :shortcuts-editing is-editing
+                                :customized customized?)
+          :data-customized (str customized?)
+          :data-conflict (str has-conflict?)
+          :aria-label command-translate
           :key command-translate}
      [:button {:on-click start-editing
                :disabled is-editing
+               :aria-label (dm/str "Edit " command-translate)
                :class (stl/css-case :shortcut-button-editable true
                                     :shortcut-button-editing is-editing)}
-      [:span {:class (stl/css :command-name)}
+      [:span {:class (stl/css :command-name)
+              :id (dm/str command-translate "-label")}
        command-translate]
-      [:div {:class (stl/css :shortcut-actions)}
+      [:div {:class (stl/css :shortcut-actions)
+             :aria-labelledby (dm/str command-translate "-label")}
        (if (and customized? (str/blank? content))
          [:> icon* {:icon-id i/broken-link
                     :size "s"
@@ -555,7 +561,7 @@
 
 (mf/defc shortcut-row*
   [{:keys [elements filter-term is-match-section is-match-subsection
-           editable? custom-shortcuts section-key conflicts]}]
+           editable? custom-shortcuts section-key conflicts hidden subsection-name]}]
   (let [shortcut-translations (->> elements vals (map :translation) sort)
         match-shortcut?       (some #(matches-search % @filter-term) shortcut-translations)
         filtered              (if (and (or is-match-section is-match-subsection) (not match-shortcut?))
@@ -564,7 +570,9 @@
         sorted-filtered       (sort filtered)
         trigger-ref            (mf/use-ref nil)]
 
-    [:ul {:class (stl/css :sub-menu)}
+    [:ul {:class (stl/css :sub-menu)
+          :id (dm/str (d/name subsection-name) "-subsection")
+          :hidden hidden}
      (for [command-translate sorted-filtered]
        (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
              [command  command-info] sc-by-translate
@@ -584,49 +592,64 @@
                                        :key command-translate
                                        :command-translate command-translate
                                        :conflicts conflicts}]
-           [:li {:class (stl/css-case :shortcuts-name true
-                                      :customized customized?)
-                 :key command-translate}
-            [:span {:class (stl/css :command-name)}
-             command-translate]
-            [:div {:class (stl/css :shortcut-actions)}
-             (if (and customized? (str/blank? content))
-               [:> tooltip* {:content (tr "shortcuts.disabled")
-                             :trigger-ref trigger-ref
-                             :id (dm/str command-translate "-tooltip")
-                             :class (stl/css :option-text)}
-                [:> icon* {:icon-id i/broken-link
-                           :aria-labelledby (dm/str command-translate "-tooltip")
-                           :size "s"
-                           :ref trigger-ref
-                           :class (stl/css :shortcut-detach-icon)}]]
-               (if has-conflict?
-                 (let [conflicting-key (get conflicts command)
-                       conflict-name   (translation-keyname :sc conflicting-key)]
-                   [:> tooltip* {:content (tr "shortcuts.overwritten-by" conflict-name)
-                                 :id (dm/str (name command) "-conflict-tooltip")
-                                 :class (stl/css :option-text)}
-                    [:> shortcuts-keys* {:content content
-                                         :command command
-                                         :is-customized customized?
-                                         :has-conflict? has-conflict?}]])
-                 [:> shortcuts-keys* {:content content
-                                      :command command
-                                      :is-customized customized?
-                                      :has-conflict? has-conflict?}]))]])))]))
+            [:li {:class (stl/css-case :shortcuts-name true
+                                       :customized customized?)
+                  :data-customized (str customized?)
+                  :data-conflict (str has-conflict?)
+                  :aria-label command-translate
+                  :key command-translate}
+             [:span {:class (stl/css :command-name)
+                     :id (dm/str command-translate "-label")}
+              command-translate]
+             [:div {:class (stl/css :shortcut-actions)
+                    :aria-labelledby (dm/str command-translate "-label")}
+              (if (and customized? (str/blank? content))
+                [:> tooltip* {:content (tr "shortcuts.disabled")
+                              :trigger-ref trigger-ref
+                              :id (dm/str command-translate "-tooltip")
+                              :class (stl/css :option-text)}
+                 [:> icon* {:icon-id i/broken-link
+                            :aria-labelledby (dm/str command-translate "-tooltip")
+                            :size "s"
+                            :ref trigger-ref
+                            :class (stl/css :shortcut-detach-icon)}]]
+                (if has-conflict?
+                  (let [conflicting-key (get conflicts command)
+                        conflict-name   (translation-keyname :sc conflicting-key)]
+                    [:> tooltip* {:content (tr "shortcuts.overwritten-by" conflict-name)
+                                  :id (dm/str (name command) "-conflict-tooltip")
+                                  :class (stl/css :option-text)}
+                     [:> shortcuts-keys* {:content content
+                                          :command command
+                                          :is-customized customized?
+                                          :has-conflict? has-conflict?}]])
+                  [:> shortcuts-keys* {:content content
+                                       :command command
+                                       :is-customized customized?
+                                       :has-conflict? has-conflict?}]))]])))]))
 
 
 (mf/defc section-title*
   [{:keys [name is-visible is-sub on-click]}]
-  [:div {:class (if is-sub
-                  (stl/css :subsection-title)
-                  (stl/css :section-title))
-         :on-click on-click}
-   [:> icon* {:icon-id (if is-visible i/arrow-down i/arrow-right)
-              :size "s"}]
-   [:span {:class (if is-sub
-                    (stl/css :subsection-name)
-                    (stl/css :section-name))} name]])
+  (let [handle-key-down
+        (fn [event]
+          (when (or (= "Enter" (.-key event))
+                    (= " " (.-key event)))
+            (.preventDefault event)
+            (on-click event)))]
+    [:button {:class (if is-sub
+                       (stl/css :subsection-title)
+                       (stl/css :section-title))
+              :on-click on-click
+              :on-key-down handle-key-down
+              :aria-expanded is-visible
+              :aria-controls (dm/str (str/lower name) (if is-sub "-subsection" "-section"))}
+     [:> icon* {:icon-id (if is-visible i/arrow-down i/arrow-right)
+                :size "s"
+                :aria-hidden true}]
+     [:span {:class (if is-sub
+                      (stl/css :subsection-name)
+                      (stl/css :section-name))} name]]))
 
 (defn- normalize-open-sections
   [open-sections]
@@ -636,7 +659,7 @@
 
 (mf/defc shortcut-subsection*
   [{:keys [subsections manage-sections filter-term is-match-section open-sections
-           editable? custom-shortcuts section-key conflicts]}]
+           editable? custom-shortcuts section-key conflicts hidden]}]
   (let [open-sections (normalize-open-sections open-sections)]
     (if (= :none (first (keys subsections)))
       [:> shortcut-row* {:elements (:children (:none subsections))
@@ -644,28 +667,33 @@
                          :is-match-section is-match-section
                          :is-match-subsection true
                          :editable? editable?
+                         :hidden hidden
                          :custom-shortcuts custom-shortcuts
                          :section-key section-key
                          :conflicts conflicts}]
 
-      [:ul {:class (stl/css :subsection-menu)}
+      [:ul {:class (stl/css :subsection-menu)
+            :hidden hidden
+            :id (dm/str (name section-key) "-section")}
        (for [[sub-name sub-info] subsections]
          (let [visible? (some #(= % (:id sub-info)) open-sections)]
            [:li {:key (name sub-name)}
-            [:> section-title* {:name (:translation sub-info)
-                                :is-visible visible?
-                                :is-sub true
-                                :on-click (manage-sections (:id sub-info))}]
+            [:h4
+             [:> section-title* {:name (:translation sub-info)
+                                 :is-visible visible?
+                                 :is-sub true
+                                 :on-click (manage-sections (:id sub-info))}]]
 
-            [:div {:style {:display (if visible? "initial" "none")}}
-             [:> shortcut-row* {:elements (:children sub-info)
-                                :filter-term filter-term
-                                :is-match-section is-match-section
-                                :is-match-subsection true
-                                :editable? editable?
-                                :custom-shortcuts custom-shortcuts
-                                :section-key section-key
-                                :conflicts conflicts}]]]))])))
+            [:> shortcut-row* {:elements (:children sub-info)
+                               :subsection-name sub-name
+                               :filter-term filter-term
+                               :is-match-section is-match-section
+                               :is-match-subsection true
+                               :editable? editable?
+                               :hidden (not visible?)
+                               :custom-shortcuts custom-shortcuts
+                               :section-key section-key
+                               :conflicts conflicts}]]))])))
 
 
 (mf/defc shortcut-section*
@@ -678,18 +706,19 @@
         subsections         (:children section-info)
         visible?            (some #(= % section-id) open-sections)]
     [:div {:class (stl/css :section)}
-     [:> section-title* {:name section-translation
-                         :is-visible visible?
-                         :is-sub false
-                         :on-click (manage-sections section-id)}]
+     [:h3 {:class (stl/css :section-header)}
+      [:> section-title* {:name section-translation
+                          :is-visible visible?
+                          :is-sub false
+                          :on-click (manage-sections section-id)}]]
 
-     [:div {:style {:display (if visible? "initial" "none")}}
-      [:> shortcut-subsection* {:subsections subsections
-                                :open-sections open-sections
-                                :manage-sections manage-sections
-                                :is-match-section false
-                                :filter-term filter-term
-                                :editable? editable?
-                                :custom-shortcuts custom-shortcuts
-                                :section-key section-key
-                                :conflicts conflicts}]]]))
+     [:> shortcut-subsection* {:subsections subsections
+                               :open-sections open-sections
+                               :manage-sections manage-sections
+                               :is-match-section false
+                               :filter-term filter-term
+                               :editable? editable?
+                               :hidden (not visible?)
+                               :custom-shortcuts custom-shortcuts
+                               :section-key section-key
+                               :conflicts conflicts}]]))

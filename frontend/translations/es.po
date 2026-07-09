@@ -4933,9 +4933,6 @@ msgstr "Seleccionar elementos que usan este estilo"
 msgid "shortcut-section.basics"
 msgstr "Básicos"
 
-#: src/app/main/ui/shortcuts.cljs
-msgid "shortcut-section.path"
-msgstr "Modo edición de rutas"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:418
 msgid "shortcut-section.dashboard"
@@ -5482,7 +5479,7 @@ msgid "shortcuts.disable"
 msgstr "Deshabilitar atajo"
 
 #: src/app/main/ui/settings/shortcuts.cljs
-msgid "shortcuts.disabled"
+msgid "shortcuts.disabled-shortcut"
 msgstr "Atajo deshabilitado"
 
 #: src/app/main/ui/settings/shortcuts.cljs
@@ -5508,6 +5505,14 @@ msgstr "Personalizados"
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.disabled"
 msgstr "Deshabilitado"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.draw-arrow"
+msgstr "Flecha"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.draw-line"
+msgstr "Linea"
 
 #: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.import-export"
@@ -5536,6 +5541,10 @@ msgstr "Mostrar/ocultar recursos"
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:187
 msgid "shortcuts.toggle-colorpalette"
 msgstr "Mostrar/ocultar paleta de colores"
+
+#: src/app/main/ui/workspace/sidebar/shortcuts.cljs
+msgid "shortcuts.toggle-comments-visibility"
+msgstr "Activar/desactivar visibilidad de comentarios"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:188
 msgid "shortcuts.toggle-focus-mode"
