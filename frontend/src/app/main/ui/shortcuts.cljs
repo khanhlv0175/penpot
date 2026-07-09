@@ -489,8 +489,7 @@
          (if has-conflict?
            (let [conflicting-key (get conflicts command)
                  conflict-name   (translation-keyname :sc conflicting-key)]
-             ;;TODO Add translation for "This shortcut has been overridden by ..."
-             [:> tooltip* {:content (str "This shortcut has been overridden by " conflict-name)
+             [:> tooltip* {:content (tr  "shortcuts.overwritten-by" conflict-name)
                            :id (dm/str (name command) "-conflict-tooltip")
                            :class (stl/css :option-text)}
               [:> shortcuts-keys* {:content content
@@ -539,7 +538,7 @@
                             :icon-size "m"}]]
          [:div {:class (stl/css :confirmation-buttons)}
           [:> icon-button* {:variant "secondary"
-                            :aria-label "disable shortcut"
+                            :aria-label (tr "shortcuts.disable")
                             :on-click (fn [e]
                                         (dom/stop-propagation e)
                                         (disabled-shortcut command))
@@ -592,8 +591,7 @@
              command-translate]
             [:div {:class (stl/css :shortcut-actions)}
              (if (and customized? (str/blank? content))
-               ;; TODO shortctus, add translation
-               [:> tooltip* {:content "Not assigned shortcut"
+               [:> tooltip* {:content (tr "shortcuts.disabled")
                              :trigger-ref trigger-ref
                              :id (dm/str command-translate "-tooltip")
                              :class (stl/css :option-text)}
@@ -605,7 +603,7 @@
                (if has-conflict?
                  (let [conflicting-key (get conflicts command)
                        conflict-name   (translation-keyname :sc conflicting-key)]
-                   [:> tooltip* {:content (str "This shortcut has been overridden by " conflict-name)
+                   [:> tooltip* {:content (tr "shortcuts.overwritten-by" conflict-name)
                                  :id (dm/str (name command) "-conflict-tooltip")
                                  :class (stl/css :option-text)}
                     [:> shortcuts-keys* {:content content

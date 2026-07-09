@@ -5621,6 +5621,18 @@ msgid "shortcuts.reset"
 msgstr "Reset to default"
 
 #: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.disable"
+msgstr "Disable shortcut"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.disabled"
+msgstr "Disabled shortcut"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.overwritten-by"
+msgstr "This shortcut has been reassigned to %s"
+
+#: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.no-personalized"
 msgstr "Head to All to start customizing your shortcuts."
 
@@ -5769,7 +5781,7 @@ msgid "shortcuts.edit-on-settings"
 msgstr "Customize on settings"
 
 #: src/app/main/ui/settings/restore_shortcuts_modal.cljs
-msgid "restore-shortcuts.moda-title"
+msgid "restore-shortcuts.modal-title"
 msgstr "Restore to default configuration"
 
 #: src/app/main/ui/settings/restore_shortcuts_modal.cljs

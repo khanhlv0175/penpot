@@ -5478,6 +5478,18 @@ msgid "shortcuts.reset"
 msgstr "Restablecer valor por defecto"
 
 #: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.disable"
+msgstr "Deshabilitar atajo"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.disabled"
+msgstr "Atajo deshabilitado"
+
+#: src/app/main/ui/settings/shortcuts.cljs
+msgid "shortcuts.overwritten-by"
+msgstr "Este atajo ha sido reasignado a %s"
+
+#: src/app/main/ui/settings/shortcuts.cljs
 msgid "shortcuts.no-personalized"
 msgstr "Dirígete a TODO para personalizar tus atajos."
 
