@@ -575,12 +575,14 @@
               (if (not (ctk/is-variant? child))
                 (report-error :not-a-variant
                               (str/ffmt "Shape % should be a variant" (:id child))
-                              child file page)
+                              child file page
+                              :variant-id shape-id)
                 (do
                   (when (not= (:variant-id child) shape-id)
                     (report-error :invalid-variant-id
                                   (str/ffmt "Variant % has invalid variant-id %" (:id child) (:variant-id child))
-                                  child file page))
+                                  child file page
+                                  :variant-id shape-id))
                   (when (not= prop-names (cfv/extract-properties-names child file-data))
                     (report-error :invalid-variant-properties
                                   (str/ffmt "Variant % has invalid properties %" (:id child) (vec prop-names))
@@ -747,7 +749,8 @@
                (not (ctk/is-variant? main-component)))
       (report-error :not-a-variant
                     (str/ffmt "Shape % should be a variant" (:id main-component))
-                    main-component file component-page))))
+                    main-component file component-page
+                    :variant-id (:variant-id component)))))
 
 (defn- check-main-inside-main
   [component file]

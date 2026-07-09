@@ -655,9 +655,20 @@
         (pcb/update-shapes [(:id shape)] repair-shape))))
 
 (defmethod repair-error :not-a-variant
-  [_ error file _]
-  (log/error :hint "Variant error code, we don't want to auto repair it for now" :code (:code error))
-  file)
+  [_ {:keys [shape page-id args]} file-data _]
+  (let [repair-shape
+        (fn [shape]
+          (let [variant-id (:variant-id args)]
+            ;; Set the desired variant-id, and empty variant-name
+            (log/debug :hint (str "  -> set variant-id to " variant-id))
+            (assoc shape
+                   :variant-id variant-id
+                   :variant-name (or (:variant-name shape) ""))))]
+
+    (log/dbg :hint "repairing shape :missing-slot" :id (:id shape) :name (:name shape) :page-id page-id)
+    (-> (pcb/empty-changes nil page-id)
+        (pcb/with-file-data file-data)
+        (pcb/update-shapes [(:id shape)] repair-shape))))
 
 (defmethod repair-error :invalid-variant-id
   [_ error file _]
