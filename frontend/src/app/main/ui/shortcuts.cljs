@@ -162,7 +162,6 @@
   [shortcuts]
   (let [subsections (into #{} (mapcat :subsections) (vals shortcuts))
         subsections (vec (sort-by name subsections))
-        _ (prn "subsections" subsections)
         get-sc-by-subsection
         (fn [subsection [k v]]
           (when (some #(= subsection %) (:subsections v)) {k v}))
@@ -232,8 +231,15 @@
      :all-section-names all-section-names}))
 
 (defn build-all-shortcuts-without-basics
-  [workspace-sc path-sc dashboard-sc viewer-sc]
-  (let [walk (fn walk [element parent-id]
+  [workspace-sc path-sc dashboard-sc viewer-sc
+   & {:keys [workspace-orig path-orig dashboard-orig viewer-orig]}]
+  (let [original-commands (into {}
+                                (concat
+                                 (map (fn [[k v]] [k (:command v)]) workspace-orig)
+                                 (map (fn [[k v]] [k (:command v)]) path-orig)
+                                 (map (fn [[k v]] [k (:command v)]) dashboard-orig)
+                                 (map (fn [[k v]] [k (:command v)]) viewer-orig)))
+        walk (fn walk [element parent-id]
                (if (nil? element)
                  element
                   (let [sorted-comp (when (sorted? element)
@@ -241,7 +247,10 @@
                        rec-fn (fn [index [k item]]
                                 (let [item-id (if (nil? parent-id)
                                                 [index]
-                                                (conj parent-id index))]
+                                                (conj parent-id index))
+                                      item (if (:command item)
+                                             (assoc item :original-command (get original-commands k (:command item)))
+                                             item)]
                                   [k (assoc item :id item-id :children (walk (:children item) item-id))]))]
                    (if sorted-comp
                      (into (sorted-map-by sorted-comp) (map-indexed (partial rec-fn) element))
@@ -356,9 +365,13 @@
                             :viewer viewer-sc-trans
                             workspace-sc-trans)
         sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
-        [command  comand-info] sc-by-translate
-        content                (or (:show-command comand-info) (:command comand-info))
-        group-map              (get custom-shortcuts section-key)
+        [command  command-info] sc-by-translate
+        content                (or (:show-command command-info) (:command command-info))
+        group-map              (if (= section-key :basics)
+                                (merge (get custom-shortcuts :workspace)
+                                       (get custom-shortcuts :dashboard)
+                                       (get custom-shortcuts :viewer))
+                                (get custom-shortcuts section-key))
         group-map              (if (map? group-map) group-map {})
         customized?            (contains? group-map command)
         has-conflict?          (contains? conflicts command)
@@ -383,11 +396,13 @@
           (reset! recorded-command* nil)
           (reset! conflict* nil))
 
+        effective-section-key (if (= section-key :basics) :workspace section-key)
+
         on-reset-shortcut
         (mf/use-fn
-         (mf/deps section-key)
+         (mf/deps effective-section-key command-info)
          (fn [shortcut-key]
-           (st/emit! (customize/reset-custom-shortcut shortcut-key section-key))
+           (st/emit! (customize/reset-custom-shortcut shortcut-key (:original-command command-info) effective-section-key))
            (clean-editing-state)))
 
         start-editing
@@ -406,19 +421,19 @@
 
         disabled-shortcut
         (mf/use-fn
-         (mf/deps command section-key)
+         (mf/deps command effective-section-key)
          (fn [event]
            (dom/prevent-default event)
            (st/emit! (customize/set-custom-shortcut
                       command
                       ""
                       nil
-                      section-key))
+                      effective-section-key))
            (clean-editing-state)))
 
         save-fn
         (mf/use-fn
-         (mf/deps recorded-command conflict command section-key)
+         (mf/deps recorded-command conflict command effective-section-key)
          (fn [event]
            (dom/prevent-default event)
            (when recorded-command
@@ -426,7 +441,7 @@
                         command
                         recorded-command
                         (:key conflict)
-                        section-key)))
+                        effective-section-key)))
            (clean-editing-state)))
 
         on-editable-container-blur
@@ -553,13 +568,17 @@
     [:ul {:class (stl/css :sub-menu)}
      (for [command-translate sorted-filtered]
        (let [sc-by-translate  (first (filter #(= (:translation (second %)) command-translate) elements))
-             [command  comand-info] sc-by-translate
-             content                (or (:show-command comand-info) (:command comand-info))
-             group-map              (get custom-shortcuts section-key)
-             group-map              (if (map? group-map) group-map {})
-             customized?            (contains? group-map command)
-             has-conflict?          (contains? conflicts command)]
-         (if editable?
+             [command  command-info] sc-by-translate
+              content                (or (:show-command command-info) (:command command-info))
+              group-map              (if (= section-key :basics)
+                                      (merge (get custom-shortcuts :workspace)
+                                             (get custom-shortcuts :dashboard)
+                                             (get custom-shortcuts :viewer))
+                                      (get custom-shortcuts section-key))
+              group-map              (if (map? group-map) group-map {})
+              customized?            (contains? group-map command)
+              has-conflict?          (contains? conflicts command)]
+          (if editable?
            [:> shortcut-row-editable* {:elements elements
                                        :custom-shortcuts custom-shortcuts
                                        :section-key section-key

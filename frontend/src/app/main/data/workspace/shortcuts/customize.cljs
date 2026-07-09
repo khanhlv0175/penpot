@@ -24,20 +24,38 @@
             group-map       (if conflicting-key
                               (assoc group-map conflicting-key "")
                               group-map)
-            new-customs      (assoc current-customs group-key group-map)
-            _ (prn "group-key" group-key)]
+            new-customs      (assoc current-customs group-key group-map)]
         (rx/of (du/update-profile-props {:custom-shortcuts new-customs})
                (ds/rebind-shortcuts))))))
 
+
 (defn reset-custom-shortcut
-  [shortcut-key group-key]
+  [shortcut-key default-command group-key]
+
   (ptk/reify ::reset-custom-shortcut
     ptk/WatchEvent
     (watch [_ state _]
       (let [current-customs (get-in state [:profile :props :custom-shortcuts] {})
             group-map       (get current-customs group-key)
             group-map       (if (map? group-map) group-map {})
+
+            ;; Find any action that is currently using the default command as its custom shortcut
+            owner-key       (when (and default-command (not= default-command ""))
+                              (some (fn [[k v]]
+                                      (when (if (vector? default-command)
+                                              (some #{v} default-command)
+                                              (= v default-command))
+                                        k))
+                                    group-map))
+
+            ;; Remove the shortcut being reset
             group-map       (dissoc group-map shortcut-key)
+
+            ;; Disable the owner that was using the default command
+            group-map       (if (and owner-key (not= owner-key shortcut-key))
+                              (assoc group-map owner-key "")
+                              group-map)
+
             new-customs      (if (empty? group-map)
                                (dissoc current-customs group-key)
                                (assoc current-customs group-key group-map))]

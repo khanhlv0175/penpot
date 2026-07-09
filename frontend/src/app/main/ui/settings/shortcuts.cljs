@@ -240,7 +240,11 @@
          workspace-shortcuts-with-translation
          path-shortcuts-with-translation
          dashboard-shortcuts-with-translation
-         viewer-shortcuts-with-translation)
+         viewer-shortcuts-with-translation
+         :workspace-orig app.main.data.workspace.shortcuts/shortcuts
+         :path-orig app.main.data.workspace.path.shortcuts/shortcuts
+         :dashboard-orig app.main.data.dashboard.shortcuts/shortcuts
+         :viewer-orig app.main.data.viewer.shortcuts/shortcuts)
 
         shortcuts-ctx-value
         {:workspace-sc-trans (d/deep-merge workspace-shortcuts-with-translation path-shortcuts-with-translation)
