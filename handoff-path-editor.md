@@ -198,8 +198,21 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   segment. `make-entry` no longer stores `:preview`, and `load-entry` clears it to nil on
   undo/redo (it is recomputed on the next `preview-next-point`). Focused unit suite green
   (14 tests / 34 assertions).
-- [ ] **Bug 5 — two racing stop signals per Esc.** `esc-pressed` and the `:interrupt`
-  it emits arrive at different points; different loops still key on different events.
+- [x] **Bug 5 — two racing stop signals per Esc.** Fixed 2026-07-10. The original race
+  (the `::esc-pressed` event vs the `:interrupt` it emits) was already dissolved by the
+  bug-11 rework: `esc-pressed` is now a pure translator emitting exactly one of
+  `finish-path` / `cancel-pending-segment` / `:interrupt`, and nothing keys on
+  `::esc-pressed` except its own shortcut. The remaining smell was `start-path-edit`'s
+  exit watcher keying on **both** `:interrupt` and `::dwe/clear-edition-mode`, even
+  though `:interrupt` always produces `clear-edition-mode` through the
+  `start-edition-mode` watch (edition.cljs), and — because that watch subscribes before
+  `start-path-edit` and re-entrant delivery is depth-first — `clear-edition-mode` is
+  already what triggers the exit. Keyed the exit watcher on the single canonical
+  `::dwe/clear-edition-mode` signal, which also covers the draw loop's direct
+  `clear-edition-mode` on exit. Focused unit suite green (14 tests / 34 assertions,
+  incl. escape/interrupt/created-path exit cases). Live-gesture re-check was blocked by
+  WebGL context loss after repeated hot reloads (read-only mode; recovered by reload but
+  hit-testing stayed flaky).
 - [ ] **Bug 6 — DOM-order race when closing a path.** Node handlers stop propagation;
   `make-node-events-stream` + `rx/race` cancels `make-drag-stream`, and `rx/race`
   resolves on any first notification including completion.

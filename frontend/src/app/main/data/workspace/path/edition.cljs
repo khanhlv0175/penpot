@@ -325,9 +325,12 @@
       (let [stopper (rx/filter (ptk/type? ::start-path-edit) stream)]
         (rx/concat
          (rx/of (undo/start-path-undo))
+         ;; `clear-edition-mode` is the single canonical "edition ended" signal:
+         ;; `:interrupt` (Esc, etc.) always yields it through the
+         ;; `start-edition-mode` watch, and the draw loop emits it directly on
+         ;; exit. Keying only on it avoids reacting to two racing stop signals.
          (->> stream
-              (rx/filter #(or (= % :interrupt)
-                              (= (ptk/type %) ::dwe/clear-edition-mode)))
+              (rx/filter (ptk/type? ::dwe/clear-edition-mode))
               (rx/take 1)
               (rx/map #(stop-path-edit id))
               (rx/take-until stopper)))))))
