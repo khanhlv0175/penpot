@@ -459,8 +459,12 @@
           (and (not= content old-content) (not empty-content?))
           (rx/empty)
 
+          ;; Nothing new was drawn: exit the editor. Emit the scoped
+          ;; clear-edition-mode (the draw loop and path-edit teardown both key
+          ;; on it) instead of a bare global :interrupt that every unrelated
+          ;; interrupt subscriber would also react to.
           (= mode :draw)
-          (rx/of :interrupt)
+          (rx/of (dwe/clear-edition-mode))
 
           :else
           (rx/of

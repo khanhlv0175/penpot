@@ -228,9 +228,15 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   Verified live: drawing adds exactly one node per click (no duplicates), and clicking
   the start node closes to a clean 3-node triangle with a single closing segment. Focused
   unit suite green (14 tests / 34 assertions).
-- [ ] **Bug 7 — bare global `:interrupt` from `check-changed-content`.** Every other
-  global interrupt subscriber also reacts, so draw-recursion teardown remains coupled
-  to unrelated editor teardown.
+- [x] **Bug 7 — bare global `:interrupt` from `check-changed-content`.** Fixed
+  2026-07-10. When a draw-mode restart produced no new content, `check-changed-content`
+  emitted a bare global `:interrupt`, which every unrelated interrupt subscriber also
+  reacts to. That `:interrupt` only reached path teardown via the `start-edition-mode`
+  watch → `clear-edition-mode` anyway, so it now emits `dwe/clear-edition-mode` directly
+  — the scoped signal the draw loop (`end-path-event?`) and path-edit exit watcher both
+  key on — decoupling draw-recursion teardown from unrelated editor teardown. Draw →
+  finish → exit lifecycle verified live (clean state, no exception); focused unit suite
+  green (14 tests / 34 assertions).
 - [x] **Bug 8 — `apply-content-modifiers` page-id fallback typo.** The problematic
   commit-building path was removed by the drawing-copy refactor; modifiers now update
   drawing content directly.
