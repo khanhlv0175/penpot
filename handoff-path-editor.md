@@ -20,7 +20,7 @@ Data layer (`frontend/src/app/main/data/workspace/path/`), re-exported by
 | File | Role |
 |---|---|
 | `state.cljs` | State locators. `get-path-id` prefers `[:workspace-drawing :object :id]`; `get-path-location` always points to `[:workspace-drawing :object]`. Existing-path edition no longer mutates file objects. |
-| `streams.cljs` | Rx building blocks: `drag-stream` (click-vs-drag discrimination via 5px/zoom threshold), `position-stream`, `move-points-stream`, `move-handler-stream`, pixel/path snapping, `finish-edition?` (BROKEN, see bug 1). |
+| `streams.cljs` | Rx building blocks: `drag-stream` (click-vs-drag discrimination via 5px/zoom threshold), `position-stream`, `move-points-stream`, `move-handler-stream`, pixel/path snapping, `finish-edition?` (matches the real `workspace.edition/clear-edition-mode`; bug 1 fixed). |
 | `drawing.cljs` | Draw mode: `handle-drawing`, `start-edition` loop, `add-node`, `drag-handler`/`finish-drag`, `close-path-drag-start`, `start-draw-mode*` recursion, `check-changed-content`, `end-path-event?`, `handle-drawing-end`. `start-created-path-edition` installs the normal edit finalizer after a newly drawn shape is added. |
 | `edition.cljs` | Move mode: `start-path-edit` copies/converts the stored shape into drawing state and installs the exit watcher; `stop-path-edit` finalizes once and clears drawing/edit state. Node/handler/arrow/split operations mutate only the drawing copy. |
 | `selection.cljs` | Hover state (`path-pointer-enter/leave`, `path-handler-enter/leave`), `select-node`, rubber-band `handle-area-selection`, `update-selection` (position remap after commit). |
@@ -162,11 +162,12 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
 
 ## 5. Confirmed bugs / hazards checklist
 
-- [ ] **Bug 1 — stale event keyword in `streams.cljs` `finish-edition?`.** It checks
-  `:app.main.data.workspace.common/clear-edition-mode`, but the event lives in
-  `app.main.data.workspace.edition`. `drag-stream` and `start-move-handler` therefore
-  do not stop on that event. `drawing.cljs` also carries the dead keyword next to the
-  correct one.
+- [x] **Bug 1 — stale event keyword in `streams.cljs` `finish-edition?`.** Fixed
+  2026-07-10. `streams.cljs` now uses `::dwe/clear-edition-mode` through an alias-only
+  require, so `drag-stream` and `start-move-handler` stop on the real event.
+  `drawing/end-path-event?` now uses the same alias and its duplicate dead keyword was
+  removed. Regression coverage asserts that the real clear event matches and
+  `:interrupt` does not.
 - [x] **Bug 2 — `start-path-edit` stopper discarded the clear comparison.** Fixed as
   part of the drawing-copy refactor: the exit stream explicitly accepts either
   `:interrupt` or `::dwe/clear-edition-mode`, takes one, and emits `stop-path-edit`;
@@ -255,7 +256,7 @@ Work planned on top of the polished editor, with required groundwork:
 prerequisite — replace position-based node identity with stable index-based identity
 and a unified selection model (`{:nodes #{idx} :segments #{[i j]} :handlers #{[i prefix]}}`
 or similar), plus the position→index remapping done once at commit time. Do that after
-open bugs 1 and 3 and before starting features 1–3. Features 5–7 are mostly
+open bug 3 and before starting features 1–3. Features 5–7 are mostly
 common-layer geometry and can proceed in parallel. A shared bezier-fitting utility in
 `common.types.path` serves both 6 and 7.
 
@@ -272,8 +273,9 @@ Continue growing the safety net alongside refactors. Current coverage:
   finalization, and created-path cleanup. It is registered in
   `frontend_tests/runner.cljs`. The tests use a real potok store through
   `frontend-tests.helpers.state`. Still missing: pointer-driven node/handler drags,
-  path-local undo/redo, draw/close gestures, and red/green coverage for open bugs 1
-  and 3. Simulated `mse/->PointerEvent`/`mse/->MouseEvent` sequences remain the right
+  path-local undo/redo, draw/close gestures, and red/green coverage for open bug 3.
+  Bug 1 has direct predicate coverage. Simulated
+  `mse/->PointerEvent`/`mse/->MouseEvent` sequences remain the right
   next layer.
 - **E2E**: only `frontend/playwright/ui/specs/stroke-to-path.spec.js` touches paths.
   Real pointer-gesture recipes are in Serena memory `frontend/playwright-gestures`;
@@ -291,6 +293,9 @@ Validation performed for the drawing-copy refactor on 2026-07-10 through Penpot 
   exactly one `update-shapes` and one commit on exit; final type `:path`; state cleared.
 - Created-path lifecycle: `start-created-path-edition` + `:interrupt` clears
   `:edition`, `:edit-path`, and drawing object without changing unchanged content.
+- Bug 1 predicate: the real `workspace.edition/clear-edition-mode` matches
+  `finish-edition?`, `:interrupt` does not, main compiler remains `:ok`, and the live
+  runtime has no exception.
 - The pnpm unit runner was not executed in that session: pnpm's local store database
   was inaccessible in the sandbox, then the stale install requested a `node_modules`
   purge. Run the focused namespace in a prepared environment before committing.
@@ -306,10 +311,13 @@ Ordered to serve the roadmap in §6:
   `pnpm run test:quiet -- --focus frontend-tests.logic.path-edition-test --log-level warn`.
 - [ ] **Expand the store-driven safety net.** Add pointer sequences for node drag,
   handler drag, arrows, tool operations, path-local undo/redo, Esc, double-click, and
-  switching draw↔move. Add red tests for open bugs 1 and 3.
-- [ ] **Fix open stopper/cleanup bugs 1 and 3.** For bug 3, either capture the edition
-  id before UpdateEvent cleanup or emit `finish-path` before clearing; wrap data events
-  passed to `rx/concat` in `rx/of`.
+  switching draw↔move. Add a red test for open bug 3.
+- [x] **Fix stale clear-edition event matching (bug 1).** Use the
+  `workspace.edition` event keyword consistently in path stream stoppers and draw-loop
+  termination.
+- [ ] **Fix open cleanup bug 3.** Either capture the edition id before UpdateEvent
+  cleanup or emit `finish-path` before clearing; wrap data events passed to
+  `rx/concat` in `rx/of`.
 - [ ] **Unify edition stop signals and make deferred ordering explicit.** Replace the
   esc-pressed/`:interrupt`/clear-edition-mode/finish-path split and document or replace
   the load-bearing `observe-on :async` / `delay 0` boundaries.

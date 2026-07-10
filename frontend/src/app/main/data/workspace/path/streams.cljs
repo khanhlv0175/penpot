@@ -9,6 +9,7 @@
    [app.common.data.macros :as dm]
    [app.common.geom.point :as gpt]
    [app.common.types.path :as path]
+   [app.main.data.workspace.edition :as-alias dwe]
    [app.main.data.workspace.path.state :as pst]
    [app.main.snap :as snap]
    [app.main.store :as st]
@@ -25,7 +26,7 @@
     (>= (gpt/distance start current) (/ drag-threshold zoom))))
 
 (defn finish-edition? [event]
-  (= (ptk/type event) :app.main.data.workspace.common/clear-edition-mode))
+  (= (ptk/type event) ::dwe/clear-edition-mode))
 
 (defn to-pixel-snap [position]
   (let [layout      (get @st/state :workspace-layout)

@@ -15,6 +15,7 @@
    [app.main.data.workspace.path.drawing :as path.drawing]
    [app.main.data.workspace.path.edition :as path.edition]
    [app.main.data.workspace.path.state :as path.state]
+   [app.main.data.workspace.path.streams :as path.streams]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]))
 
@@ -38,6 +39,10 @@
     (path.state/set-content
      state
      (path/move-content (path.state/get-path state :content) delta))))
+
+(t/deftest clear-edition-mode-finishes-path-streams
+  (t/is (path.streams/finish-edition? (dwe/clear-edition-mode)))
+  (t/is (not (path.streams/finish-edition? :interrupt))))
 
 (t/deftest editing-path-only-updates-drawing-copy
   (t/async
