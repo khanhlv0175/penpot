@@ -94,6 +94,11 @@
 
         contenteditable-ref (mf/use-ref nil)
 
+        ;; Tracks an in-flight pointer drag-selection so `on-pointer-move` only
+        ;; repaints the selection overlay while a drag is active (mirrors the
+        ;; WASM `is_pointer_selection_active` guard), not on every hover move.
+        dragging-ref (mf/use-ref false)
+
         fallback-fonts    (wasm.api/fonts-from-text-content (:content shape) false)
         fallback-families (map (fn [font]
                                  (font-family-from-font-id (:font-id font))) fallback-fonts)
@@ -206,7 +211,7 @@
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-select-all)
-                   (wasm.api/request-render "text-select-all"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  ;; Enter
                  (= key "Enter")
@@ -237,44 +242,44 @@
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-toggle-overtype-mode)
-                   (wasm.api/request-render "text-overtype-mode"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  ;; Arrow keys
                  (= key "ArrowLeft")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 0 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  (= key "ArrowRight")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 1 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  (= key "ArrowUp")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 2 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  (= key "ArrowDown")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 3 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  (= key "Home")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 4 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  (= key "End")
                  (do
                    (dom/prevent-default event)
                    (text-editor/text-editor-move-cursor 5 ctrl? shift?)
-                   (wasm.api/request-render "text-cursor-move"))
+                   (wasm.api/render-text-editor-overlay!))
 
                  ;; Let contenteditable handle text input via on-input
                  :else nil)))))
@@ -299,35 +304,47 @@
          (fn [^js event]
            (let [native-event (dom/event->native-event event)
                  off-pt (dom/get-offset-position native-event)]
-             (wasm.api/text-editor-pointer-down off-pt))))
+             (mf/set-ref-val! dragging-ref true)
+             (wasm.api/text-editor-pointer-down off-pt)
+             ;; Repaint the caret over the cached tiles instead of a full render,
+             ;; which flashes at high zoom (see `render-text-editor-overlay!`).
+             (wasm.api/render-text-editor-overlay!))))
 
         on-pointer-move
         (mf/use-fn
          (fn [^js event]
            (let [native-event (dom/event->native-event event)
                  off-pt (dom/get-offset-position native-event)]
-             (wasm.api/text-editor-pointer-move off-pt))))
+             (wasm.api/text-editor-pointer-move off-pt)
+             ;; Only while dragging: `text-editor-pointer-move` is a no-op
+             ;; otherwise, so avoid repainting on plain hover.
+             (when (mf/ref-val dragging-ref)
+               (wasm.api/render-text-editor-overlay!)))))
 
         on-pointer-up
         (mf/use-fn
          (fn [^js event]
            (let [native-event (dom/event->native-event event)
                  off-pt (dom/get-offset-position native-event)]
-             (wasm.api/text-editor-pointer-up off-pt))))
+             (mf/set-ref-val! dragging-ref false)
+             (wasm.api/text-editor-pointer-up off-pt)
+             (wasm.api/render-text-editor-overlay!))))
 
         on-click
         (mf/use-fn
          (fn [^js event]
            (let [native-event (dom/event->native-event event)
                  off-pt (dom/get-offset-position native-event)]
-             (wasm.api/text-editor-set-cursor-from-offset off-pt))))
+             (wasm.api/text-editor-set-cursor-from-offset off-pt)
+             (wasm.api/render-text-editor-overlay!))))
 
         on-double-click
         (mf/use-fn
          (fn [^js event]
            (let [native-event (dom/event->native-event event)
                  off-pt (dom/get-offset-position native-event)]
-             (wasm.api/text-editor-select-word-boundary off-pt))))
+             (wasm.api/text-editor-select-word-boundary off-pt)
+             (wasm.api/render-text-editor-overlay!))))
 
         on-focus
         (mf/use-fn
@@ -367,7 +384,11 @@
        (let [timeout-id (atom nil)
              schedule-blink (fn schedule-blink []
                               (when (text-editor/text-editor-has-focus?)
-                                (wasm.api/request-render "cursor-blink"))
+                                ;; Redraw only the caret/selection (cached tiles + overlay)
+                                ;; instead of a full `request-render`, which flashes on
+                                ;; zoomed-in views by kicking off a progressive tile-by-tile
+                                ;; shape re-render.
+                                (wasm.api/render-text-editor-overlay!))
                               (reset! timeout-id (js/setTimeout schedule-blink caret-blink-interval-ms)))]
          (schedule-blink)
          (fn []

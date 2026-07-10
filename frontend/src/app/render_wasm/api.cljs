@@ -420,6 +420,25 @@
   (when (initialized?)
     (h/call wasm/internal-module "_free_gpu_resources")))
 
+(defn- drain-text-editor-events!
+  "Pop and handle every pending text-editor event.
+
+   StylesChanged syncs the caret's current styles to the toolbar. Returns true
+   when some event needs a full shape re-render (content or layout changed)."
+  []
+  (loop [needs-render? false]
+    (let [ev (text-editor/text-editor-poll-event)]
+      (if (or (nil? ev) (= ev TEXT_EDITOR_EVENT_NONE))
+        needs-render?
+        (do
+          (when (= ev TEXT_EDITOR_EVENT_STYLES_CHANGED)
+            (let [current-styles (text-editor/text-editor-get-current-styles)
+                  shape-id (text-editor/text-editor-get-active-shape-id)]
+              (st/emit! (texts/v3-update-text-editor-styles shape-id current-styles))))
+          (recur (or needs-render?
+                     (= ev TEXT_EDITOR_EVENT_CONTENT_CHANGED)
+                     (= ev TEXT_EDITOR_EVENT_NEEDS_LAYOUT))))))))
+
 ;; This should never be called from the outside.
 (defn- render
   [timestamp]
@@ -431,21 +450,11 @@
       (when (is-text-editor-wasm-enabled @st/state)
         (text-editor/text-editor-update-blink timestamp)
         (text-editor/text-editor-render-overlay)
-        ;; Poll for editor events; if any event occurs, trigger a re-render
-        (let [ev (text-editor/text-editor-poll-event)]
-          (when (and ev (not= ev TEXT_EDITOR_EVENT_NONE))
-            ;; When StylesChanged, get the current styles.
-            (case ev
-              ;; StylesChanged Event
-              TEXT_EDITOR_EVENT_STYLES_CHANGED
-              (let [current-styles (text-editor/text-editor-get-current-styles)
-                    shape-id (text-editor/text-editor-get-active-shape-id)]
-                (st/emit! (texts/v3-update-text-editor-styles shape-id current-styles)))
-
-              ;; Default case
-              nil)
-
-            (request-render "text-editor-event"))))
+        ;; Drain editor events. Only content/layout changes need a full shape
+        ;; re-render; selection/style changes are already reflected by the
+        ;; overlay redrawn just above.
+        (when (drain-text-editor-events!)
+          (request-render "text-editor-content")))
       (catch :default e
         (js/console.error "text-editor overlay/update failed:" e)))
 
@@ -466,13 +475,24 @@
    *shapes* are the cached part (already-rasterized tiles, not rebuilt); the UI
    is re-rendered every call, which is what lets it reflect a new selection.
 
-   Use for UI-only updates that don't change shapes (e.g. the ruler selection
-   band): unlike `request-render`, it never kicks off a progressive,
-   tile-by-tile shape re-render, so it does not flash on zoomed-in views where
-   the scene spans multiple tiles."
+   Use for UI-only updates that don't change shapes."
   []
   (when (and wasm/context-initialized? (not @wasm/context-lost?))
     (h/call wasm/internal-module "_render_from_cache" 0)))
+
+(defn render-text-editor-overlay!
+  "Repaint the text-editor caret and selection over the cached shape tiles,
+   without a full (tile-rebuilding) render."
+  ([]
+   (render-text-editor-overlay! (js/performance.now)))
+  ([timestamp]
+   (when (and wasm/context-initialized? (not @wasm/context-lost?))
+     (render-from-cache!)
+     (when (is-text-editor-wasm-enabled @st/state)
+       (text-editor/text-editor-update-blink timestamp)
+       (text-editor/text-editor-render-overlay)
+       (when (drain-text-editor-events!)
+         (request-render "text-editor-content"))))))
 
 ;; CSS-pixel blur radius for the page-transition snapshot (DPR-scaled in WASM).
 (def ^:private TRANSITION_BLUR_RADIUS 4.0)
