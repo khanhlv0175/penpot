@@ -172,6 +172,8 @@
              (rx/map snap/create-ranges))]
 
     (->> ms/mouse-position
+         ;; The subject can hold nil until the pointer enters the viewport
+         (rx/filter gpt/point?)
          (rx/map to-pixel-snap)
          (rx/with-latest-from ranges-stream (snap-toggled-stream))
          (rx/map (fn [[position ranges snap-toggled]]

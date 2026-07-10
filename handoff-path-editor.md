@@ -32,7 +32,7 @@ Data layer (`frontend/src/app/main/data/workspace/path/`), re-exported by
 | `undo.cljs` | Session-local undo stack (separate from workspace undo), driven by `rx/from-atom` over drawing content; `merge-head` collapses node+handler-drag into one entry; `undo-lock` guards double subscription. Undo/redo no longer persist file changes during edition. |
 | `tools.cljs` | `process-path-tool` → make-corner/curve, add/remove/merge/join/separate nodes, `toggle-snap`; tool results update drawing content only. |
 | `common.cljs` | `finish-path` (cleans `:last-point/:prev-handler/:drag-handler/:preview`, close-subpaths). |
-| `shortcuts.cljs` | Path-editor keymap; Esc/Enter/V emit `esc-pressed` → `:interrupt`; arrows → `move-selected`; cmd+Z → `undo-path` (the path-local undo). |
+| `shortcuts.cljs` | Path-editor keymap; Esc/Enter/V emit `esc-pressed` → `cancel-pending-segment` when a segment is in progress, `:interrupt` otherwise; arrows → `move-selected`; cmd+Z → `undo-path` (the path-local undo). |
 
 UI:
 - `frontend/src/app/main/ui/workspace/shapes/path/editor.cljs` — `path-editor*` +
@@ -156,9 +156,11 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
 7. **Tools**: `process-path-tool` updates drawing content and geometry only
    (+ `clear-edition-mode` if content becomes empty; deletion is committed by the
    finalizer).
-8. **Exit**: Esc → `esc-pressed` (matched *directly* by `end-path-event?`) →
-   `:interrupt` (matched by `drag-stopper` and by `start-edition-mode`'s watch →
-   `clear-edition-mode`). During path exit, generic clear removes `:edition` but keeps
+8. **Exit**: Esc → `esc-pressed`. With a pending segment it only emits
+   `cancel-pending-segment` (draw loop keeps running; next click starts a new
+   subpath). Without one it emits `:interrupt` (matched by `drag-stopper` and by
+   `start-edition-mode`'s watch → `clear-edition-mode`); `end-path-event?` matches
+   `:interrupt`, not `esc-pressed`. During path exit, generic clear removes `:edition` but keeps
    the drawing copy and `:edit-path` until the `start-path-edit` watcher emits
    `stop-path-edit`. Finalization compares `:old-content` with drawing content: equal is
    a no-op (so a rectangle stays a rectangle); changed content emits exactly one
@@ -207,6 +209,45 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   path active. Root cause: new paths used `start-edition-mode` + draw mode without
   installing the `start-path-edit` finalizer. Fixed by `start-created-path-edition`,
   which emits `start-edition-mode`, `start-path-edit`, then `change-edit-mode :draw`.
+- [x] **Bug 11 — Escape restarted drawing on the edited path.** Fixed 2026-07-10.
+  `start-edition` collapsed every stop reason into an unqualified `::end-edition`, and
+  `start-draw-mode*` therefore recursed on Escape before the later `:interrupt`
+  finalized the edited shape. This produced a hanging preview from the edited path
+  instead of leaving the drawing tool ready for a new path. `::end-edition` now
+  carries `:restart?`; only explicit `finish-path` and draw-mode double-click restart
+  the same path. Escape, interrupt, clear-edition, page teardown, and superseding
+  edition events end the loop without recursion. Legitimate restarts first clear
+  transient endpoint/preview state.
+  **Second pass (same day):** the first fix only covered `start-draw-mode*`; the
+  *initial* draw loop persisted the bug. `handle-drawing`'s continuation ignored the
+  stop reason: `handle-drawing-end` runs after `rx/observe-on :async`, so Esc's
+  synchronous `:interrupt` had already passed before `start-created-path-edition`
+  installed any exit watcher, and the unconditional re-entry left a live draw loop
+  previewing from the stale `:last-point`. Reproduced live (preview tracked the mouse
+  after Esc). Fix: `handle-drawing` threads `(:restart? (deref event))` into
+  `handle-drawing-end`; non-restart ends commit the shape and emit
+  `dwe/clear-edition-mode` (which also stops the path-undo watcher and clears
+  `:edit-path`, drawing object, and lock) instead of re-entering edition. The short
+  (<2 segment) branch gets the same cleanup. Double-click/`finish-path` ends still
+  re-enter continued edition via `start-created-path-edition`.
+  **Escape semantics (decided same day):** Esc must NOT exit the editor while a
+  segment is in progress. `esc-pressed` now branches on `:last-point` and `:edition`:
+  - pending segment and **no `:edition`** (a path still being created): emit
+    `common/finish-path`, which ends the initial draw loop as a restart — the shape
+    is created, `start-created-path-edition` enters continued edition in draw mode,
+    and the path edition top bar appears (it is keyed on `:edition`, so a plain
+    cancel here would leave the editor without its menu);
+  - pending segment with `:edition` (continued/existing edition): emit
+    `common/cancel-pending-segment`, which clears
+    `:last-point/:prev-handler/:drag-handler/:preview` **without stopping the draw
+    loop** — the next preview is a `:move-to` and the next click starts a new
+    subpath in the same shape;
+  - no pending segment: emit `:interrupt`; the edition exits/commits as before.
+  `esc-pressed` was therefore removed from `end-path-event?` — the draw loop never
+  ends on Esc directly, only through `:interrupt`/clear-edition/finalize-page/
+  superseding-edition (non-restart) or `finish-path`/double-click (restart).
+  Restarting `handle-drawing-end` also emits `finish-path` first, so restarts don't
+  carry pending state into the continued edition.
 
 ## 6. Refactors and features checklist
 
@@ -280,8 +321,8 @@ Continue growing the safety net alongside refactors. Current coverage:
   finalization, and created-path cleanup. It is registered in
   `frontend_tests/runner.cljs`. The tests use a real potok store through
   `frontend-tests.helpers.state`. Still missing: pointer-driven node/handler drags,
-  path-local undo/redo, and draw/close gestures. Bugs 1 and 3 have direct event-level
-  coverage. Simulated
+  path-local undo/redo, and draw/close gestures. Bugs 1, 3, and 11 have direct
+  event-level coverage. Simulated
   `mse/->PointerEvent`/`mse/->MouseEvent` sequences remain the right
   next layer.
 - **E2E**: only `frontend/playwright/ui/specs/stroke-to-path.spec.js` touches paths.
@@ -306,9 +347,47 @@ Validation performed for the drawing-copy refactor on 2026-07-10 through Penpot 
 - Bug 3 ordering: path clear emits exactly one `finish-path`; at that event edit and
   drawing state are retained while transient preview/last-point are cleaned; final
   state removes edition/edit/drawing data. Non-path clear emits no path event.
-- The pnpm unit runner was not executed in that session: pnpm's local store database
-  was inaccessible in the sandbox, then the stale install requested a `node_modules`
-  purge. Run the focused namespace in a prepared environment before committing.
+- Bug 11 stop classification: Escape produces `::end-edition {:restart? false}` and
+  cannot recurse on the edited path. Explicit subpath completion uses `:restart? true`,
+  emits `finish-path` before recursion, clears endpoint/preview state, and makes the
+  next same-shape preview a `:move-to`.
+- The pnpm unit runner cannot run on the host (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`
+  on the stale install); run it inside the devenv container instead, where it works:
+  `cd /home/penpot/penpot/frontend && pnpm run test:quiet -- --focus
+  frontend-tests.logic.path-edition-test --log-level warn`.
+
+Validation for the bug 11 second pass and the position-stream guard on 2026-07-10
+(live gestures through Playwright, state inspected via the in-page `debug`/cljs
+runtime; note real input needs `document.hasFocus()`, use `page.bringToFront()` after
+reloads):
+
+- Branch hazard found and fixed: entering path draw mode while `ms/mouse-position`
+  still holds nil (pointer never over the viewport, e.g. toolbar click or unfocused
+  window) crashed `path-preview*` — `position-stream` did `(assoc nil :shift? …)`,
+  yielding a coordinate-less map that became a `{:x nil :y nil}` preview segment.
+  `position-stream` now filters non-point values before snapping.
+- Esc while creating a new path with a pending segment: shape created, `:edition`
+  set, the path edition top bar renders (asserted in the DOM), editor continues in
+  `:draw` mode with pending state cleared; the next clicks appended `M…L…` as a new
+  subpath of the same shape. A further Esc with a pending segment only cancels it
+  (bar stays); Esc with nothing pending exits and commits once, clearing `:edition`,
+  `:edit-path`, drawing object, tool, and lock. No crash.
+- Testing caveat: the WASM viewport sometimes loses its WebGL context on hot
+  reloading — the workspace then flips to read-only and replaces the top toolbar
+  with "Rendering unavailable", which mimics missing editor UI (path bar included).
+  Check `refs/render-context-lost?` before trusting UI assertions; a page reload
+  recovers.
+- Double-click finish: shape committed and continued edition entered in `:draw` mode;
+  a later Esc exits it fully without recursion or extra shapes.
+- Double-click an existing path: `:move` edition on the drawing copy; Esc exits
+  cleanly with no content change.
+- Focused unit namespace run in devenv: 13 tests, 34 assertions, 0 failures,
+  including new tests driving `handle-drawing` through async `::end-edition`
+  with `:restart?` false/true (no re-entry + `clear-edition-mode` vs
+  `finish-path` + `start-created-path-edition`) and `esc-pressed` with/without a
+  pending segment (`cancel-pending-segment` vs `:interrupt`).
+- `pnpm run lint:clj` clean; `cljfmt` clean after fixing pre-existing
+  `runner.cljs` formatting.
 
 ## 8. Suggested plan
 
@@ -317,7 +396,8 @@ Ordered to serve the roadmap in §6:
 - [x] **Drawing-state isolation and one final persistent update.** Includes existing
   shapes, newly created paths, unchanged simple-shape preservation, deferred empty-path
   removal, viewport rendering, and initial lifecycle tests.
-- [ ] **Run the focused frontend unit namespace in a prepared environment.** Command:
+- [x] **Run the focused frontend unit namespace in a prepared environment.** Done
+  2026-07-10 inside the devenv container (host pnpm install is unusable):
   `pnpm run test:quiet -- --focus frontend-tests.logic.path-edition-test --log-level warn`.
 - [ ] **Expand the store-driven safety net.** Add pointer sequences for node drag,
   handler drag, arrows, tool operations, path-local undo/redo, Esc, double-click, and

@@ -26,3 +26,13 @@
         (-> state
             (update-in [:workspace-local :edit-path id] clean-edit-state)
             (update-in (st/get-path-location state :content) path/close-subpaths))))))
+
+(defn cancel-pending-segment
+  "Drops the in-progress segment of the draw loop without stopping it, so
+  the next click starts a new subpath."
+  []
+  (ptk/reify ::cancel-pending-segment
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (update-in state [:workspace-local :edit-path id] clean-edit-state)))))

@@ -48,10 +48,17 @@
   (let [type (ptk/type event)]
     (or
      (= type ::common/finish-path)
-     (= type :app.main.data.workspace.path.shortcuts/esc-pressed)
      (= type ::dwe/clear-edition-mode)
      (= type ::dwpg/finalize-page)
      (= event :interrupt) ;; ESC
+     (and ^boolean (mse/mouse-event? event)
+          ^boolean (mse/mouse-double-click-event? event)))))
+
+(defn restart-draw-loop?
+  [event]
+  (let [type (ptk/type event)]
+    (or
+     (= type ::common/finish-path)
      (and ^boolean (mse/mouse-event? event)
           ^boolean (mse/mouse-double-click-event? event)))))
 
@@ -250,10 +257,15 @@
                  (rx/filter end-path-event?)
                  (rx/share))
 
+            stop-event
+            (volatile! nil)
+
             stoper-stream
             (->> stream
                  (rx/filter (ptk/type? ::start-edition))
-                 (rx/merge end-stream))
+                 (rx/merge end-stream)
+                 (rx/tap #(vreset! stop-event %))
+                 (rx/share))
 
             ;; Mouse move preview
             mousemove-events
@@ -277,7 +289,11 @@
               (->> (rx/merge mousemove-events
                              mousedown-events)
                    (rx/take-until stoper-stream))
-              (rx/of (ptk/data-event ::end-edition))))))))
+              (->> (rx/of nil)
+                   (rx/map (fn [_]
+                             (ptk/data-event
+                              ::end-edition
+                              {:restart? (restart-draw-loop? @stop-event)}))))))))))
 
 (defn setup-frame
   []
@@ -307,7 +323,7 @@
                            (with-meta {:index drop-index})))))))))
 
 (defn- handle-drawing-end
-  [shape-id]
+  [shape-id restart?]
   (ptk/reify ::handle-drawing-end
     ptk/UpdateEvent
     (update [_ state]
@@ -320,11 +336,21 @@
     ptk/WatchEvent
     (watch [_ state _]
       (when-let [content (dm/get-in state [:workspace-drawing :object :content])]
-        (if (> (count content) 1)
-          (rx/of (setup-frame)
+        (cond
+          (and (> (count content) 1) restart?)
+          (rx/of (common/finish-path)
+                 (setup-frame)
                  (dwdc/handle-finish-drawing)
                  (start-created-path-edition shape-id))
-          (rx/of (dwdc/handle-finish-drawing)))))))
+
+          (> (count content) 1)
+          (rx/of (setup-frame)
+                 (dwdc/handle-finish-drawing)
+                 (dwe/clear-edition-mode))
+
+          :else
+          (rx/of (dwdc/handle-finish-drawing)
+                 (dwe/clear-edition-mode)))))))
 
 (defn handle-drawing
   "Hanndle the start of drawing new path shape"
@@ -344,7 +370,8 @@
               (rx/filter (ptk/type? ::end-edition))
               (rx/take 1)
               (rx/observe-on :async)
-              (rx/map (partial handle-drawing-end shape-id))))))))
+              (rx/map (fn [event]
+                        (handle-drawing-end shape-id (:restart? (deref event)))))))))))
 
 (declare start-draw-mode*)
 
@@ -389,9 +416,12 @@
            (->> stream
                 (rx/filter (ptk/type? ::end-edition))
                 (rx/take 1)
-                (rx/mapcat (fn [_]
-                             (rx/of (check-changed-content)
-                                    (start-draw-mode*))))))
+                (rx/mapcat (fn [event]
+                             (if (:restart? (deref event))
+                               (rx/of (common/finish-path)
+                                      (check-changed-content)
+                                      (start-draw-mode*))
+                               (rx/empty))))))
           (rx/empty))))))
 
 (defn change-edit-mode

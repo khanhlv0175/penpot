@@ -9,6 +9,8 @@
    [app.main.data.shortcuts :as ds]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.path :as drp]
+   [app.main.data.workspace.path.common :as drp.common]
+   [app.main.data.workspace.path.state :as drp.state]
    [app.main.store :as st]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -22,9 +24,23 @@
 (defn esc-pressed []
   (ptk/reify ::esc-pressed
     ptk/WatchEvent
-    (watch [_ _ _]
-      ;; Not interrupt when we're editing a path
-      (rx/of :interrupt))))
+    (watch [_ state _]
+      ;; While drawing a segment, escape only cancels it and keeps the
+      ;; editor in draw mode; without one it exits the edition.
+      (let [id       (drp.state/get-path-id state)
+            pending? (some? (get-in state [:workspace-local :edit-path id :last-point]))
+            edition  (get-in state [:workspace-local :edition])]
+        (cond
+          ;; A path still being created: finishing it creates the shape
+          ;; and continues its edition in draw mode
+          (and pending? (nil? edition))
+          (rx/of (drp.common/finish-path))
+
+          pending?
+          (rx/of (drp.common/cancel-pending-segment))
+
+          :else
+          (rx/of :interrupt))))))
 
 (def shortcuts
   {:move-nodes      {:tooltip "M"
