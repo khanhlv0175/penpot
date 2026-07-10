@@ -209,13 +209,6 @@
            drag-events
            (rx/of (finish-drag)))))))))
 
-(defn make-node-events-stream
-  [stream]
-  (->> stream
-       (rx/filter (ptk/type? ::close-path-drag-start))
-       (rx/take 1)
-       (rx/merge-map #(rx/empty))))
-
 (defn make-drag-stream
   [state stream down-event]
 
@@ -272,16 +265,17 @@
             (->> (streams/position-stream state)
                  (rx/map #(preview-next-point %)))
 
-            ;; From mouse down we can have: click, drag and double click
+            ;; A viewport mouse-down starts an add-node + optional handler drag.
+            ;; Node clicks stop propagation and never reach here (the viewport
+            ;; only emits :down for its own controls), so closing a path is
+            ;; driven entirely by close-path-drag-start's own watch.
             mousedown-events
             (->> mouse-down
                  ;; We just ignore the mouse event and stream down the
                  ;; last position event
                  (rx/with-latest-from #(-> %2) (streams/position-stream state))
-                 ;; We change to the stream that emits the first event
                  (rx/switch-map
-                  #(rx/race (make-node-events-stream stream)
-                            (make-drag-stream state stream %)))
+                  #(make-drag-stream state stream %))
                  (rx/take-until end-stream))]
 
         (->> (rx/concat

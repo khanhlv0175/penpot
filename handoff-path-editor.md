@@ -213,9 +213,21 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   incl. escape/interrupt/created-path exit cases). Live-gesture re-check was blocked by
   WebGL context loss after repeated hot reloads (read-only mode; recovered by reload but
   hit-testing stayed flaky).
-- [ ] **Bug 6 — DOM-order race when closing a path.** Node handlers stop propagation;
-  `make-node-events-stream` + `rx/race` cancels `make-drag-stream`, and `rx/race`
-  resolves on any first notification including completion.
+- [x] **Bug 6 — DOM-order race when closing a path.** Fixed 2026-07-10. The draw loop
+  raced `make-node-events-stream` (waiting for `close-path-drag-start` to cancel a
+  spurious add-node) against `make-drag-stream` inside `rx/switch-map` over `mouse-down`.
+  That guard was inert: (1) `make-drag-stream` emits `add-node` synchronously on
+  subscription, so `rx/race` always resolves to it before `make-node-events-stream` can
+  react; and (2) `mouse-down` only fires for viewport clicks — node handlers
+  `stop-propagation` and the viewport's `on-pointer-down` only emits `:down` when the
+  event target's own class is `viewport-controls` (`dom/class?` checks the node itself,
+  not ancestors), so a node click never produces a `mouse-down`, never spawns a
+  `make-drag-stream`, and never needs cancelling. Closing is driven entirely by
+  `close-path-drag-start`'s own watch. Removed `make-node-events-stream` and the
+  `rx/race`; the `switch-map` now uses `make-drag-stream` directly (behaviour-identical).
+  Verified live: drawing adds exactly one node per click (no duplicates), and clicking
+  the start node closes to a clean 3-node triangle with a single closing segment. Focused
+  unit suite green (14 tests / 34 assertions).
 - [ ] **Bug 7 — bare global `:interrupt` from `check-changed-content`.** Every other
   global interrupt subscriber also reacts, so draw-recursion teardown remains coupled
   to unrelated editor teardown.
