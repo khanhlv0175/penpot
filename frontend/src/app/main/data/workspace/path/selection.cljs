@@ -110,9 +110,21 @@
         state
         (let [id       (dm/get-in state [:workspace-local :edition])
               content  (st/get-path state :content)
-              in-rect  {:nodes (helpers/nodes-in-rect content rect)
-                        :segments (helpers/segments-in-rect content rect)
-                        :handlers (helpers/handlers-in-rect content rect)}
+
+              ;; Marquee priority is nodes > segments > handlers: any node
+              ;; inside the rectangle selects only nodes, segments are
+              ;; selected only when no node is inside, and handlers only when
+              ;; the rectangle touches nothing else.
+              nodes    (helpers/nodes-in-rect content rect)
+              segments (if (empty? nodes)
+                         (helpers/segments-in-rect content rect)
+                         #{})
+              handlers (if (and (empty? nodes) (empty? segments))
+                         (helpers/handlers-in-rect content rect)
+                         #{})
+              in-rect  {:nodes nodes
+                        :segments segments
+                        :handlers handlers}
               selection
               (reduce-kv
                (fn [selection type identities]

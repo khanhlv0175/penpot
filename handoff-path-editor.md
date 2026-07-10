@@ -358,10 +358,17 @@ Work planned on top of the polished editor, with required groundwork:
    empty-selection copy leaves the clipboard untouched, and exit persists one commit
    with the new subpaths.
 - [x] **Feature 3 — drag selection of segments, nodes and handlers.** Completed
-   2026-07-10. The marquee computes all three identity sets once per animation frame.
+   2026-07-10. The marquee computes the identity sets once per animation frame.
    Nodes and visible handler control points use rect containment; lines and approximated
    Bézier segments use rect intersection. Replace, append, and remove selection modes
    operate on the complete grouped selection map.
+   **Priority rework (2026-07-11, user requirement):** the marquee selects a single
+   element type with priority nodes > segments > handlers — any node inside the
+   rectangle selects only nodes, segments are selected only when no node is inside,
+   and handlers only when the rectangle contains neither nodes nor segments
+   (`select-path-area` computes the lower-priority sets lazily). Live-verified with
+   real drags on a bowed curve: curve-only rect → segment, rect with a node → that
+   node only, handler-only rect → that handler, rect over everything → all nodes.
 - [ ] **Feature 4 — round corners in a path.** Fits the existing `process-path-tool` pipeline
    (like make-corner/make-curve); main work is a corner-fillet geometry fn in
    `common.types.path`. If a per-node radius becomes a persistent, editable property

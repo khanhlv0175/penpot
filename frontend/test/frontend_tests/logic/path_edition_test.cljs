@@ -185,24 +185,58 @@
               :handlers #{[2 :c1]}}
              (get-in state'''' [:workspace-local :edit-path id :selection])))))
 
-(t/deftest path-area-selection-includes-segments-nodes-and-handlers
+(t/deftest path-area-selection-prioritizes-nodes-over-segments-over-handlers
   (let [id        (random-uuid)
         content   (selectable-path-content)
         selection path.helpers/empty-selection
         state     (selectable-path-state id content selection)
+        ;; Contains segment 1 and handler [1 :c1] but no node
         rect      (grc/make-rect 1 -2 3 4)
         state'    (ptk/update (path.selection/select-path-area
                                rect selection false)
                               state)
-        node-rect (grc/make-rect -1 -1 1.5 2)
+        ;; Contains node 0, segment 1 and handler [1 :c1]
+        node-rect (grc/make-rect -1 -1 4 2)
         state''   (ptk/update (path.selection/select-path-area
                                node-rect selection false)
                               state)]
     (t/is (= {:nodes #{}
               :segments #{1}
-              :handlers #{[1 :c1]}}
+              :handlers #{}}
              (get-in state' [:workspace-local :edit-path id :selection])))
     (t/is (= {:nodes #{0}
+              :segments #{}
+              :handlers #{}}
+             (get-in state'' [:workspace-local :edit-path id :selection])))))
+
+(t/deftest path-area-selection-picks-handlers-only-when-nothing-else-is-inside
+  (let [id        (random-uuid)
+        ;; Curve bulging up to y 7.5 with both handlers on y 10, away
+        ;; from the curve itself
+        content   (path/content
+                   [{:command :move-to
+                     :params {:x 0 :y 0}}
+                    {:command :curve-to
+                     :params {:c1x 0 :c1y 10
+                              :c2x 10 :c2y 10
+                              :x 10 :y 0}}])
+        selection path.helpers/empty-selection
+        state     (selectable-path-state id content selection)
+        ;; Contains only the [1 :c1] handler control point
+        handler-rect (grc/make-rect -1 9 2 2)
+        state'    (ptk/update (path.selection/select-path-area
+                               handler-rect selection false)
+                              state)
+        ;; Contains both handlers and the top of the curve
+        mixed-rect (grc/make-rect -1 5 12 7)
+        state''   (ptk/update (path.selection/select-path-area
+                               mixed-rect selection false)
+                              state)]
+    (t/is (= {:nodes #{}
+              :segments #{}
+              :handlers #{[1 :c1]}}
+             (get-in state' [:workspace-local :edit-path id :selection])))
+    (t/is (= {:nodes #{}
               :segments #{1}
               :handlers #{}}
              (get-in state'' [:workspace-local :edit-path id :selection])))))
