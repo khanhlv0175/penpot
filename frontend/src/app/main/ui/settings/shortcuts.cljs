@@ -44,7 +44,7 @@
       {:variant "secondary"
        :on-click on-restore-all
        :class (stl/css :restore-all-button)
-       :icon i/at}
+       :icon i/reload}
       (tr "dashboard.restore-all-deleted-button")])])
 
 (defn- filter-shortcuts-tree
