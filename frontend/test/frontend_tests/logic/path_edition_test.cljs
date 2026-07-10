@@ -14,6 +14,7 @@
    [app.common.types.path :as path]
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.edition :as dwe]
+   [app.main.data.workspace.path.changes :as path.changes]
    [app.main.data.workspace.path.common :as path.common]
    [app.main.data.workspace.path.drawing :as path.drawing]
    [app.main.data.workspace.path.edition :as path.edition]
@@ -428,3 +429,113 @@
            (t/is (nil? (get-in new-state [:workspace-local :edition])))
            (t/is (nil? (get-in new-state [:workspace-local :edit-path id])))
            (t/is (nil? (get-in new-state [:workspace-drawing :object])))))))))
+
+(defn- with-dangling-subpath-start
+  [content]
+  (path/content (conj (vec content)
+                      {:command :move-to
+                       :params {:x 30 :y 40}})))
+
+(t/deftest cancel-pending-segment-drops-dangling-subpath-start
+  (let [id      (random-uuid)
+        content (selectable-path-content)
+        state   {:workspace-local
+                 {:edition id
+                  :edit-path {id {:edit-mode :draw
+                                  :last-point (gpt/point 30 40)
+                                  :preview {:command :line-to
+                                            :params {:x 50 :y 50}}}}}
+                 :workspace-drawing
+                 {:object {:id id
+                           :type :path
+                           :content (with-dangling-subpath-start content)}}}
+        state'  (ptk/update (path.common/cancel-pending-segment) state)]
+    (t/is (= (vec content)
+             (vec (get-in state' [:workspace-drawing :object :content]))))
+    (t/is (nil? (get-in state' [:workspace-local :edit-path id :last-point])))
+    (t/is (nil? (get-in state' [:workspace-local :edit-path id :preview])))))
+
+(t/deftest finish-path-drops-dangling-subpath-start
+  (let [id      (random-uuid)
+        content (selectable-path-content)
+        state   {:workspace-local
+                 {:edition id
+                  :edit-path {id {:edit-mode :draw
+                                  :last-point (gpt/point 30 40)}}}
+                 :workspace-drawing
+                 {:object {:id id
+                           :type :path
+                           :content (with-dangling-subpath-start content)}}}
+        state'  (ptk/update (path.common/finish-path) state)]
+    (t/is (= (vec (path/close-subpaths content))
+             (vec (get-in state' [:workspace-drawing :object :content]))))
+    (t/is (nil? (get-in state' [:workspace-local :edit-path id :last-point])))))
+
+(t/deftest finalize-ignores-dangling-subpath-start
+  (let [file        (setup-rect-file)
+        rect        (cths/get-shape file :rect1)
+        id          (:id rect)
+        path-shape  (path/convert-to-path rect)
+        old-content (:content path-shape)
+        state       {:current-file-id (:id file)
+                     :current-page-id (cthf/current-page-id file)
+                     :files {(:id file) file}
+                     :workspace-local
+                     {:edition id
+                      :edit-path {id {:old-content old-content}}}
+                     :workspace-drawing
+                     {:object (assoc path-shape
+                                     :content
+                                     (with-dangling-subpath-start old-content))}}
+        emissions   (atom [])]
+    (->> (ptk/watch (path.changes/finalize-path-content id) state nil)
+         (rx/subs! #(swap! emissions conj %)))
+    (t/is (empty? @emissions))))
+
+(t/deftest remap-selection-follows-content-structure
+  (let [content     (selectable-path-content)
+        ;; Same command layout: index 1 turned into a line-to
+        corner      (path/content
+                     (assoc (vec content) 1 {:command :line-to
+                                             :params {:x 10 :y 0}}))
+        ;; Different layout: the middle node was removed
+        shorter     (path/content
+                     [{:command :move-to
+                       :params {:x 0 :y 0}}
+                      {:command :line-to
+                       :params {:x 20 :y 0}}])
+        selection   {:nodes #{1 2}
+                     :segments #{2}
+                     :handlers #{[1 :c1] [2 :c2]}}]
+    (t/is (= {:nodes #{1 2}
+              :segments #{2}
+              :handlers #{[2 :c2]}}
+             (path.helpers/remap-selection selection content corner)))
+    (t/is (= {:nodes #{1}
+              :segments #{}
+              :handlers #{}}
+             (path.helpers/remap-selection selection content shorter)))))
+
+(t/deftest group-handler-drag-ignores-stale-handler-identities
+  (let [id        (random-uuid)
+        content   (path/content
+                   [{:command :move-to
+                     :params {:x 0 :y 0}}
+                    {:command :line-to
+                     :params {:x 10 :y 0}}
+                    {:command :curve-to
+                     :params {:c1x 12 :c1y 0
+                              :c2x 18 :c2y 0
+                              :x 20 :y 0}}])
+        selection {:nodes #{}
+                   :segments #{}
+                   ;; [1 :c1] points to a line-to and [9 :c2] is out of range
+                   :handlers #{[1 :c1] [2 :c1] [9 :c2]}}
+        state     (selectable-path-state id content selection)
+        event     (path.edition/modify-selected-handlers
+                   id [2 :c1] {} 3 4 true)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])]
+    (t/is (= {:c1x 3 :c1y 4} (get modifiers 2)))
+    (t/is (nil? (get modifiers 1)))
+    (t/is (nil? (get modifiers 9)))))

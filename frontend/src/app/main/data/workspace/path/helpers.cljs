@@ -254,3 +254,23 @@
                   (filter (fn [[_ seg]] (contains? positions (path.helpers/segment->point seg))))
                   (map first))
             (d/enumerate new-content)))))
+
+(defn remap-selection
+  "Adjust a grouped selection map after the content changed. With the same
+  command layout (equal command count) node and segment indices remain valid
+  and only handlers whose command lost its control points are dropped;
+  otherwise node indices are re-resolved by position and segment/handler
+  selections are cleared."
+  [selection old-content new-content]
+  (let [selection (or selection empty-selection)]
+    (if (= (count old-content) (count new-content))
+      (update selection :handlers
+              (fn [handlers]
+                (into #{}
+                      (filter (fn [[index _]]
+                                (= :curve-to (:command (nth new-content index nil)))))
+                      handlers)))
+      (assoc empty-selection
+             :nodes (remap-selected-nodes (get selection :nodes #{})
+                                          old-content
+                                          new-content)))))

@@ -13,6 +13,7 @@
    [app.main.data.workspace.edition :as-alias dwe]
    [app.main.data.workspace.pages :as-alias dwpg]
    [app.main.data.workspace.path.common :as common]
+   [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.state :as st]
    [app.main.store :as store]
    [beicon.v2.core :as rx]
@@ -42,17 +43,22 @@
      :prev-handler (get-in state [:workspace-local :edit-path id :prev-handler])}))
 
 (defn- load-entry [state {:keys [content selrect points last-point prev-handler]}]
-  (let [id (st/get-path-id state)]
+  (let [id (st/get-path-id state)
+        old-content (st/get-path state :content)]
     (-> state
         (d/assoc-in-when (st/get-path-location state :content) content)
         (d/assoc-in-when (st/get-path-location state :selrect) selrect)
         (d/assoc-in-when (st/get-path-location state :points) points)
         (d/update-in-when
          [:workspace-local :edit-path id]
-         assoc
-         :preview nil
-         :last-point last-point
-         :prev-handler prev-handler))))
+         (fn [edit-state]
+           ;; The index-based selection must follow the restored content
+           (cond-> (assoc edit-state
+                          :preview nil
+                          :last-point last-point
+                          :prev-handler prev-handler)
+             (some? content)
+             (update :selection helpers/remap-selection old-content content)))))))
 
 (defn undo-path []
   (ptk/reify ::undo-path

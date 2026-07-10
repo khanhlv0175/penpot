@@ -33,10 +33,13 @@
             edit-content (get-in state [:workspace-drawing :object :content])
             new-content  (some-> edit-content (normalize-content false))]
         (cond
+          ;; A trailing move-to alone is not a real change, so the
+          ;; normalized content is compared too.
           (or (nil? shape)
               (nil? old-content)
               (nil? edit-content)
-              (= old-content edit-content))
+              (= old-content edit-content)
+              (= old-content new-content))
           (rx/empty)
 
           (empty? new-content)

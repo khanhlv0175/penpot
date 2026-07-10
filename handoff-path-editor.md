@@ -619,3 +619,38 @@ indices into the remaining position-based common tool functions.
   The insertion preview is not rendered; click-to-insert-node is temporarily disabled.
 - `path_edition_test.cljs`: state-level selection, marquee, grouped-handler movement,
   and segment movement coverage. Focused suite result: 20 tests / 51 assertions.
+
+## 12. Branch self-review fixes (2026-07-10, committed)
+
+A full self-review of the branch against `origin/develop` found five issues, all fixed:
+
+1. **Stale segment/handler selection after structural tool ops.** `process-path-tool`
+   only remapped `:selection :nodes`. New `helpers/remap-selection` adjusts the whole
+   grouped map: with an unchanged command count node/segment indices stay and handlers
+   whose command is no longer `:curve-to` are pruned; with a changed count nodes are
+   re-resolved by position and segment/handler selections are cleared.
+2. **Group handler drag corrupted paths through stale handler ids.**
+   `path/apply-content-modifiers` converts a `line-to` into a `curve-to` when it
+   receives `c1x/c1y` deltas, so a stale selected handler id (make-corner on another
+   selected node, undo of make-curve) silently re-curved a straight segment.
+   `modify-selected-handlers` now filters selected handler ids to commands that are
+   still `:curve-to` (also guards out-of-range ids).
+3. **Dangling trailing `move-to` accumulated orphan nodes.** `add-node` appends a
+   `move-to` when starting a subpath, but `cancel-pending-segment` only cleared
+   `:last-point/:preview`; the next click then appended another `move-to`, leaving
+   phantom orphan nodes that got persisted. `cancel-pending-segment` and `finish-path`
+   now drop a trailing `move-to` (via `update-object-content`, which also refreshes
+   geometry and no longer touches a nonexistent drawing object).
+4. **`finalize-path-content` compared un-normalized content.** A lone trailing
+   `move-to` made unchanged content look changed, converting an untouched simple shape
+   to `:path` on exit. The no-op condition now also compares the normalized
+   `new-content`.
+5. **Path-local undo/redo left index selections stale.** `undo/load-entry` now applies
+   `helpers/remap-selection` against the restored content.
+
+Regression tests added for all five (`cancel-pending-segment-drops-dangling-subpath-start`,
+`finish-path-drops-dangling-subpath-start`, `finalize-ignores-dangling-subpath-start`,
+`remap-selection-follows-content-structure`,
+`group-handler-drag-ignores-stale-handler-identities`). Focused suite: 25 tests /
+62 assertions, 0 failures (devenv container). `lint:clj` 0/0, `check-fmt:clj` clean,
+main build `:ok`.

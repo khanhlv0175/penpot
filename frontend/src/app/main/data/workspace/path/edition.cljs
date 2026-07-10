@@ -46,6 +46,13 @@
             selected-handlers (dm/get-in state
                                          [:workspace-local :edit-path id :selection :handlers]
                                          #{})
+            ;; A stale identity whose command is no longer a curve must not
+            ;; receive deltas: handler modifiers over a line-to would convert
+            ;; it back into a curve.
+            selected-handlers (into #{}
+                                    (filter (fn [[index _]]
+                                              (= :curve-to (:command (nth content index nil)))))
+                                    selected-handlers)
             selected-handlers (cond-> selected-handlers
                                 (empty? selected-handlers) (conj primary))
             move-delta        (gpt/point dx dy)
