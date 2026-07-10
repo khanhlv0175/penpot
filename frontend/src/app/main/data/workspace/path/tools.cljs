@@ -9,12 +9,16 @@
    [app.common.data.macros :as dm]
    [app.common.types.path :as path]
    [app.main.data.workspace.edition :as dwe]
+   [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.state :as st]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
 (defn process-path-tool
-  "Generic function that executes path transformations with the content and selected nodes"
+  "Generic function that executes path transformations with the content and selected nodes.
+  The common-layer tool fns are position-based, so the selected node indices are
+  converted to positions at this boundary and the selection is remapped to the new
+  indices once the structural change is applied."
   ([tool-fn]
    (process-path-tool nil tool-fn))
   ([points tool-fn]
@@ -24,19 +28,23 @@
        (let [shape (st/get-path state)
              id    (st/get-path-id state)
 
-             selected-points
-             (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
+             old-content (:content shape)
+
+             selected-nodes
+             (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
 
              points
-             (or points selected-points)]
+             (or points (helpers/node-positions old-content selected-nodes))]
 
          (if (and (seq points) (some? shape))
            (let [new-content
-                 (-> (tool-fn (:content shape) points)
+                 (-> (tool-fn old-content points)
                      (path/close-subpaths))]
-             (cond-> (st/set-content state new-content)
-               (seq new-content)
-               (update-in (st/get-path-location state) path/update-geometry)))
+             (-> (cond-> (st/set-content state new-content)
+                   (seq new-content)
+                   (update-in (st/get-path-location state) path/update-geometry))
+                 (update-in [:workspace-local :edit-path id :selected-nodes]
+                            #(helpers/remap-selected-nodes (or % #{}) old-content new-content))))
            state)))
 
      ptk/WatchEvent

@@ -67,8 +67,9 @@ Geometry/content model: `common/src/app/common/types/path.cljc` plus
 ## 2. Ephemeral edit state
 
 `[:workspace-local :edit-path <shape-id>]` keys: `:edit-mode` (`:draw`/`:move`),
-`:selected-points` (set of *positions*), `:hover-points`, `:hover-handlers`
-(`[index prefix]`), `:content-modifiers` (index → dx/dy/c1x… deltas applied at render
+`:selected-nodes`/`:selected-segments` (sets of *content command indices*),
+`:selected-handlers` (set of `[index prefix]`), `:hover-nodes` (indices),
+`:hover-handlers` (`[index prefix]`), `:content-modifiers` (index → dx/dy/c1x… deltas applied at render
 and then materialized into drawing content), `:moving-nodes`, `:moving-handler`,
 `:drag-handler`, `:prev-handler`,
 `:last-point`, `:preview` (next-segment preview), `:snap-toggled`, `:old-content`
@@ -82,14 +83,21 @@ unchanged until exit. This is essential because `update-shapes` must compare aga
 the real stored object. Path-local undo must never replace `:old-content`; otherwise
 finalization can incorrectly decide that an edited path is unchanged.
 
-**Node identity is position-based, not index-based.** Selection/hover sets hold
-geometric points; after modifier application `update-selection` remaps them via an
-old-point→new-point map; the editor UI builds `point->base`/`base->point` maps by
-zipping point lists. Consequences: duplicate positions collapse into one; two nodes at
-the same coordinates are indistinguishable; `create-node-at-position` smuggles split
-params in point *metadata*, which breaks value equality (FIXME comment in
-`editor.cljs` `on-pointer-down`). This is a systemic source of weirdness and a
-candidate for the deep fix (stable indices).
+**Node identity is index-based (stable-identity groundwork, done 2026-07-10).**
+Selection/hover sets hold *content command indices*; a node's position is derived on
+demand via `helpers/node-position`/`node-positions`. Indices are invariant under moves,
+so dragging/arrow moves need **no** selection remap (the old `update-selection`
+point-change remap is gone); only structural tool ops remap, once, by re-resolving the
+old selected positions against the new content (`helpers/remap-selected-nodes`, called
+in `process-path-tool`). The editor renders each node from its index (no more
+`point->base`/`base->point` maps). The move/arrow/snap/tool pipelines and
+`path-actions/check-enabled` stay position-based and convert indices→positions at their
+boundary via `helpers/node-positions`, so the pre-existing duplicate-coordinate collapse
+persists *only* inside those position-based common fns (acceptable; a later pass can make
+the common tool fns index-based). `:selected-segments`/`:selected-handlers` state +
+unified helpers are scaffolded for features 1–3 but their drag-select interaction is not
+wired yet. Remaining wart: `create-node-at-position` still smuggles split params in point
+*metadata* (FIXME in `editor.cljs` `on-pointer-down`).
 
 ## 3. Event transport & ordering model (the heart of it)
 
@@ -469,8 +477,16 @@ Ordered to serve the roadmap in §6:
 - [ ] **Unify edition stop signals and make deferred ordering explicit.** Replace the
   esc-pressed/`:interrupt`/clear-edition-mode/finish-path split and document or replace
   the load-bearing `observe-on :async` / `delay 0` boundaries.
-- [ ] **Introduce stable node/segment/handler identity and a unified selection model.**
-  This is the prerequisite for roadmap features 1–3 and part of feature 4.
+- [~] **Introduce stable node/segment/handler identity and a unified selection model.**
+  Done for **nodes** (2026-07-10): selection/hover are content-command-index based,
+  rendering iterates by index, moves keep indices (no remap), structural tools remap once
+  via `helpers/remap-selected-nodes`; `:selected-segments`/`:selected-handlers` +
+  `helpers/{node-indices,node-position,node-positions,nodes-in-rect,remap-selected-nodes}`
+  are scaffolded. Live-verified: click/shift/rubber-band select, node drag (index stable),
+  make-curve (selection kept), remove-node (selection remapped), arrow move. **Remaining**
+  for features 1–3: wire segment + handler *selection interaction* (click/drag-select),
+  segment hit-testing/rendering, and optionally push indices into the common tool fns to
+  drop the boundary conversion.
 - [ ] **Implement roadmap features.** Geometry-heavy features can proceed alongside
   structural work; share one bezier-fitting utility between smoothing and
   remove-with-approximation.

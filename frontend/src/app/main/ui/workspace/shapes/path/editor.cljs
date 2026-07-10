@@ -12,6 +12,7 @@
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]
    [app.main.data.workspace.path :as drp]
+   [app.main.data.workspace.path.helpers :as dwp.helpers]
    [app.main.snap :as snap]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -19,7 +20,6 @@
    [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
-   [clojure.set :refer [map-invert]]
    [goog.events :as events]
    [rumext.v2 :as mf]))
 
@@ -42,7 +42,7 @@
 
 (mf/defc path-point*
   {::mf/private true}
-  [{:keys [position zoom edit-mode is-hover is-selected is-preview is-start-path is-last is-new is-curve]}]
+  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-start-path is-last is-new is-curve]}]
   (let [{:keys [x y]} position
 
         is-draw (= edit-mode :draw)
@@ -54,13 +54,17 @@
 
         on-enter
         (mf/use-fn
+         (mf/deps index)
          (fn [_]
-           (st/emit! (drp/path-pointer-enter position))))
+           (when (some? index)
+             (st/emit! (drp/path-pointer-enter index)))))
 
         on-leave
         (mf/use-fn
+         (mf/deps index)
          (fn [_]
-           (st/emit! (drp/path-pointer-leave position))))
+           (when (some? index)
+             (st/emit! (drp/path-pointer-leave index)))))
 
         on-pointer-down
         (fn [event]
@@ -89,7 +93,7 @@
 
                   is-move
                   ;; If we're dragging a selected item we don't change the selection
-                  (st/emit! (drp/start-move-path-point position is-shift))
+                  (st/emit! (drp/start-move-path-point index is-shift))
 
                   (and is-draw is-start-path)
                   (st/emit! (drp/start-path-from-point position))
@@ -273,23 +277,22 @@
                 preview
                 content-modifiers
                 last-point
-                selected-points
+                selected-nodes
                 moving-nodes
                 moving-handler
                 hover-handlers
-                hover-points
+                hover-nodes
                 snap-toggled]}
         state
 
-        selected-points
-        (or selected-points #{})
+        selected-nodes
+        (or selected-nodes #{})
+
+        hover-nodes
+        (or hover-nodes #{})
 
         base-content
         (get shape :content)
-
-        base-points
-        (mf/with-memo [base-content]
-          (path/get-points base-content))
 
         content
         (mf/with-memo [base-content content-modifiers]
@@ -299,8 +302,13 @@
         (mf/with-memo [content]
           (path/get-points content))
 
-        point->base (->> (map hash-map content-points base-points) (reduce merge))
-        base->point (map-invert point->base)
+        ;; Node identity is the content command index; modifiers preserve
+        ;; indices, so a node is rendered from its index regardless of where it
+        ;; has been dragged. `content-points` (which skips close-path) aligns
+        ;; positionally with `node-indices`.
+        node-entries
+        (mf/with-memo [content content-points]
+          (mapv vector (dwp.helpers/node-indices content) content-points))
 
         points
         (mf/with-memo [content-points]
@@ -361,11 +369,8 @@
                          :is-start-path is-path-start
                          :zoom zoom}]])
 
-     (for [position points]
-       (let [pos-x (dm/get-prop position :x)
-             pos-y (dm/get-prop position :y)
-
-             show-handler?
+     (for [[index position] node-entries]
+       (let [show-handler?
              (fn [[index prefix]]
                ;; FIXME: get-handler-point is executed twice for each
                ;; render, this can be optimized
@@ -378,18 +383,18 @@
                   (not-empty))
 
              point-selected?
-             (contains? selected-points (get point->base position))
+             (contains? selected-nodes index)
 
              point-hover?
-             (contains? hover-points (get point->base position))
+             (contains? hover-nodes index)
 
              is-last
-             (= last-point (get point->base position))
+             (= last-point position)
 
              is-curve
              (boolean position-handlers)]
 
-         [:g.path-node {:key (dm/str pos-x "-" pos-y)}
+         [:g.path-node {:key (dm/str "node-" index)}
           [:g.point-handlers {:pointer-events (when (= edit-mode :draw) "none")}
            (for [[hindex prefix] position-handlers]
              (let [handler-position  (path/get-handler-point content hindex prefix)
@@ -409,7 +414,8 @@
                    :snap-angle (and moving-handler? matching-handler?)
                    :edit-mode edit-mode}])))]
 
-          [:> path-point* {:position position
+          [:> path-point* {:index index
+                           :position position
                            :zoom zoom
                            :edit-mode edit-mode
                            :is-selected point-selected?
@@ -427,14 +433,15 @@
           :zoom zoom}]])
 
      (when ^boolean show-snap?
-       (let [[snap-selected snap-points]
+       (let [selected-positions (dwp.helpers/node-positions content selected-nodes)
+             [snap-selected snap-points]
              (cond
                (some? drag-handler) [#{drag-handler} points]
                (some? preview) [#{(path.helpers/segment->point preview)} points]
                (some? moving-handler) [#{moving-handler} points]
                :else
-               [(->> selected-points (map base->point) (into #{}))
-                (->> points (remove selected-points) (into #{}))])]
+               [selected-positions
+                (->> points (remove selected-positions) (into #{}))])]
          [:g.path-snap {:pointer-events "none"}
           [:> path-snap* {:selected snap-selected
                           :points snap-points

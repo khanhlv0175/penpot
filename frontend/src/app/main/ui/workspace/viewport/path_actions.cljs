@@ -9,6 +9,7 @@
   (:require
    [app.common.types.path.segment :as path.segm]
    [app.main.data.workspace.path :as drp]
+   [app.main.data.workspace.path.helpers :as path.helpers]
    [app.main.data.workspace.path.shortcuts :as sc]
    [app.main.store :as st]
    [app.main.ui.icons :as deprecated-icon]
@@ -68,14 +69,14 @@
 
 (mf/defc path-actions*
   [{:keys [shape state]}]
-  (let [{:keys [edit-mode selected-points snap-toggled]} state
+  (let [{:keys [edit-mode selected-nodes snap-toggled]} state
 
         content (:content shape)
 
         enabled-buttons
         (mf/use-memo
-         (mf/deps content selected-points)
-         #(check-enabled content selected-points))
+         (mf/deps content selected-nodes)
+         #(check-enabled content (path.helpers/node-positions content selected-nodes)))
 
         on-select-draw-mode
         (mf/use-fn

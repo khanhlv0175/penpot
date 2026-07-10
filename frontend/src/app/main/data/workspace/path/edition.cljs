@@ -40,7 +40,7 @@
             (assoc-in [:workspace-local :edit-path id :moving-handler] point))))))
 
 (defn- apply-content-modifiers*
-  [id new-content point-change]
+  [id new-content]
   (ptk/reify ::apply-content-modifiers*
     ptk/UpdateEvent
     (update [_ state]
@@ -56,9 +56,11 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (if (empty? new-content)
-        (rx/of (dwe/clear-edition-mode))
-        (rx/of (selection/update-selection point-change))))))
+      ;; Modifiers only move existing nodes/handlers, they never change the
+      ;; content structure, so node indices (the selection identity) stay valid
+      ;; and need no remap. Empty content means the last node was removed.
+      (when (empty? new-content)
+        (rx/of (dwe/clear-edition-mode))))))
 
 (defn apply-content-modifiers []
   (ptk/reify ::apply-content-modifiers
@@ -71,15 +73,10 @@
             (dm/get-in state [:workspace-local :edit-path id :content-modifiers])]
         (if (or (nil? shape) (nil? content-modifiers))
           (rx/of (dwe/clear-edition-mode))
-          (let [content      (get shape :content)
-                new-content  (path/apply-content-modifiers content content-modifiers)
-
-                old-points   (path/get-points content)
-                new-points   (path/get-points new-content)
-                point-change (->> (map hash-map old-points new-points) (reduce merge))]
-
-            (when (and (some? new-content) (some? shape))
-              (rx/of (apply-content-modifiers* id new-content point-change)))))))))
+          (let [content     (get shape :content)
+                new-content (path/apply-content-modifiers content content-modifiers)]
+            (when (some? new-content)
+              (rx/of (apply-content-modifiers* id new-content)))))))))
 
 (defn modify-content-point
   [content {dx :x dy :y} modifiers point]
@@ -130,7 +127,8 @@
 
             modifiers-reducer (partial modify-content-point content delta)
 
-            points (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            points (helpers/node-positions content selected-nodes)
 
             modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
             modifiers (->> points
@@ -143,18 +141,18 @@
 (declare drag-selected-points)
 
 (defn start-move-path-point
-  [position shift?]
+  [index shift?]
   (ptk/reify ::start-move-path-point
     ptk/WatchEvent
     (watch [_ state _]
       (let [id (dm/get-in state [:workspace-local :edition])
-            selected-points (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
-            selected? (contains? selected-points position)]
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            selected? (contains? selected-nodes index)]
         (streams/drag-stream
          (rx/of
-          (when-not selected? (selection/select-node position shift?))
+          (when-not selected? (selection/select-node index shift?))
           (drag-selected-points @ms/mouse-position))
-         (rx/of (selection/select-node position shift?)))))))
+         (rx/of (selection/select-node index shift?)))))))
 
 (defn drag-selected-points
   [start-position]
@@ -165,11 +163,13 @@
 
             id (dm/get-in state [:workspace-local :edition])
 
-            selected-points (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
+            content (st/get-path state :content)
+
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            selected-points (helpers/node-positions content selected-nodes)
 
             start-position (apply min-key #(gpt/distance start-position %) selected-points)
 
-            content (st/get-path state :content)
             points  (path/get-points content)]
 
         (rx/concat
@@ -222,7 +222,9 @@
               current-move (dm/get-in state [:workspace-local :edit-path id :current-move])]
           ;; id can be null if we just selected the tool but we didn't start drawing
           (if (and id (= same-event current-move))
-            (let [points (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
+            (let [content        (st/get-path state :content)
+                  selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+                  points         (helpers/node-positions content selected-nodes)
 
                   move-events (->> stream
                                    (rx/filter (ptk/type? ::move-selected))
@@ -316,7 +318,9 @@
                                          (assoc state :edit-mode :draw)
                                          state)
                                        {:edit-mode :move
-                                        :selected #{}
+                                        :selected-nodes #{}
+                                        :selected-segments #{}
+                                        :selected-handlers #{}
                                         :snap-toggled false})]
                            (assoc state :old-content (:content shape))))))))
 

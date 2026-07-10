@@ -6,7 +6,9 @@
 
 (ns app.main.data.workspace.path.helpers
   (:require
+   [app.common.data :as d]
    [app.common.geom.point :as gpt]
+   [app.common.geom.shapes :as gsh]
    [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]))
@@ -81,3 +83,64 @@
 
           (and (some? op-idx) (= opposite node) match-distance? match-angle?)
           (update op-idx assoc ocx (- (:x hnv)) ocy (- (:y hnv)))))))
+
+;; --- Stable node/segment/handler identity
+;;
+;; Nodes, segments and handlers in the path editor are identified by their
+;; content command index (a handler additionally by its :c1/:c2 prefix), not by
+;; their geometric position. Indices are stable while nodes are moved and only
+;; shift when the content structure changes, so the position-based collapse
+;; (two nodes at the same coordinates were indistinguishable) is avoided.
+;; `close-path` commands are not selectable nodes: their endpoint is the subpath
+;; start and they carry no anchor of their own.
+
+(defn node?
+  "True when the command at the given content index is a selectable node."
+  [content index]
+  (not= :close-path (:command (nth content index nil))))
+
+(defn node-indices
+  "Indices of every selectable node in the content."
+  [content]
+  (into []
+        (comp (remove (fn [[_ seg]] (= :close-path (:command seg))))
+              (map first))
+        (d/enumerate content)))
+
+(defn node-position
+  "Position of the node at the given content command index."
+  [content index]
+  (path.helpers/segment->point (nth content index)))
+
+(defn node-positions
+  "Set of positions for the given node indices in the content."
+  [content indices]
+  (let [indices (set indices)]
+    (into #{}
+          (comp (filter (fn [[index _]] (contains? indices index)))
+                (map (fn [[_ seg]] (path.helpers/segment->point seg))))
+          (d/enumerate content))))
+
+(defn nodes-in-rect
+  "Indices of the nodes whose position falls inside the given rect."
+  [content rect]
+  (into #{}
+        (comp (remove (fn [[_ seg]] (= :close-path (:command seg))))
+              (filter (fn [[_ seg]] (gsh/has-point-rect? rect (path.helpers/segment->point seg))))
+              (map first))
+        (d/enumerate content)))
+
+(defn remap-selected-nodes
+  "Re-resolve selected node indices against `new-content` after a structural
+  change, matching the positions the indices had in `old-content`. This is the
+  one position->index remapping done at commit time; pure moves keep their
+  indices and need no remap."
+  [selected-nodes old-content new-content]
+  (if (empty? selected-nodes)
+    selected-nodes
+    (let [positions (node-positions old-content selected-nodes)]
+      (into #{}
+            (comp (remove (fn [[_ seg]] (= :close-path (:command seg))))
+                  (filter (fn [[_ seg]] (contains? positions (path.helpers/segment->point seg))))
+                  (map first))
+            (d/enumerate new-content)))))
