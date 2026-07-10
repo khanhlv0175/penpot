@@ -12,12 +12,15 @@
    [app.common.test-helpers.shapes :as cths]
    [app.common.types.path :as path]
    [app.main.data.workspace.edition :as dwe]
+   [app.main.data.workspace.path.common :as path.common]
    [app.main.data.workspace.path.drawing :as path.drawing]
    [app.main.data.workspace.path.edition :as path.edition]
    [app.main.data.workspace.path.state :as path.state]
    [app.main.data.workspace.path.streams :as path.streams]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
-   [frontend-tests.helpers.state :as ths]))
+   [frontend-tests.helpers.state :as ths]
+   [potok.v2.core :as ptk]))
 
 (defn- setup-rect-file
   []
@@ -43,6 +46,32 @@
 (t/deftest clear-edition-mode-finishes-path-streams
   (t/is (path.streams/finish-edition? (dwe/clear-edition-mode)))
   (t/is (not (path.streams/finish-edition? :interrupt))))
+
+(t/deftest clear-edition-mode-finishes-active-path-before-finalizing
+  (let [id         (random-uuid)
+        event      (dwe/clear-edition-mode)
+        state      {:workspace-local {:edition id
+                                      :edit-path {id {:edit-mode :move}}}
+                    :workspace-drawing {:object {:id id}}}
+        state'     (ptk/update event state)
+        emissions  (atom [])]
+    (->> (ptk/watch event state' nil)
+         (rx/subs! #(swap! emissions conj %)))
+    (t/is (nil? (get-in state' [:workspace-local :edition])))
+    (t/is (some? (get-in state' [:workspace-local :edit-path id])))
+    (t/is (= [::path.common/finish-path]
+             (mapv ptk/type @emissions)))))
+
+(t/deftest clear-non-path-edition-does-not-emit-finish-path
+  (let [id        (random-uuid)
+        event     (dwe/clear-edition-mode)
+        state     {:workspace-local {:edition id}}
+        state'    (ptk/update event state)
+        emissions (atom [])]
+    (->> (ptk/watch event state' nil)
+         (rx/subs! #(swap! emissions conj %)))
+    (t/is (nil? (get-in state' [:workspace-local :edition])))
+    (t/is (empty? @emissions))))
 
 (t/deftest editing-path-only-updates-drawing-copy
   (t/async

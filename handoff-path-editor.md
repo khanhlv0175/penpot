@@ -107,10 +107,11 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
 3. **A `watch` subscribing to `stream` misses the event that spawned it** — hence the
    explicit re-emit hack in `move-selected` ("First event is not read by the stream so
    we need to send it again").
-4. **A `watch` receives post-update state of its own event** — this still makes the
-   generic `clear-edition-mode` `finish-path` branch dead (open bug 3). Path edition now
-   avoids depending on that branch: clear retains path drawing/edit state long enough
-   for the `start-path-edit` watcher to emit `stop-path-edit` and finalize it.
+4. **A `watch` receives post-update state of its own event.** Bug 3 is fixed by
+   capturing the active path id inside the clear event during its UpdateEvent. Its
+   WatchEvent can therefore emit `finish-path` after `:edition` is removed but while
+   path drawing/edit state is deliberately retained; the `start-path-edit` watcher
+   subsequently emits `stop-path-edit` and finalizes it.
 5. `ms/mouse-position` & modifier streams (`app.main.streams`) are behavior-subjects
    fed from `st/stream`; `@ms/mouse-position` reads are common (e.g. `drag-stream`
    start point, `start-move-path-point`).
@@ -172,11 +173,12 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   part of the drawing-copy refactor: the exit stream explicitly accepts either
   `:interrupt` or `::dwe/clear-edition-mode`, takes one, and emits `stop-path-edit`;
   starting another `start-path-edit` stops the old listener.
-- [ ] **Bug 3 — generic `clear-edition-mode` `finish-path` branch is dead.** Its
-  UpdateEvent removes `:edition` before its watch reads post-update state, so `id` is
-  nil. The `(rx/concat <ptk-event>)` form would also need `rx/of`. Path edition no
-  longer relies on this branch, but the generic bug remains and other editors/exits
-  must be audited before removing or rewriting it.
+- [x] **Bug 3 — generic `clear-edition-mode` `finish-path` branch was dead.** Fixed
+  2026-07-10. The event captures the active path id in a volatile during its
+  pre-cleanup update. Its watch emits `(rx/of (finish-path))` only for path edition;
+  non-path edition returns an empty stream and cannot create path state. Live ordering
+  validation observed drawing/edit state present and transient preview/last-point
+  cleared at `finish-path`, followed by complete cleanup at `stop-path-edit`.
 - [ ] **Bug 4 — undo-entry re-entrancy.** `add-undo-entry` is injected synchronously
   from the swap that changed drawing content, before that event's watch. Persisting
   during path-local undo has been removed, and `:old-content` now stays stable, but
@@ -255,10 +257,10 @@ Work planned on top of the polished editor, with required groundwork:
 **Groundwork conclusions:** features 1–3 (and partially 4) all converge on the same
 prerequisite — replace position-based node identity with stable index-based identity
 and a unified selection model (`{:nodes #{idx} :segments #{[i j]} :handlers #{[i prefix]}}`
-or similar), plus the position→index remapping done once at commit time. Do that after
-open bug 3 and before starting features 1–3. Features 5–7 are mostly
-common-layer geometry and can proceed in parallel. A shared bezier-fitting utility in
-`common.types.path` serves both 6 and 7.
+or similar), plus the position→index remapping done once at commit time. With the
+event-cleanup fixes complete, this is the next structural prerequisite before features
+1–3. Features 5–7 are mostly common-layer geometry and can proceed in parallel. A
+shared bezier-fitting utility in `common.types.path` serves both 6 and 7.
 
 ## 7. Testing status
 
@@ -273,8 +275,8 @@ Continue growing the safety net alongside refactors. Current coverage:
   finalization, and created-path cleanup. It is registered in
   `frontend_tests/runner.cljs`. The tests use a real potok store through
   `frontend-tests.helpers.state`. Still missing: pointer-driven node/handler drags,
-  path-local undo/redo, draw/close gestures, and red/green coverage for open bug 3.
-  Bug 1 has direct predicate coverage. Simulated
+  path-local undo/redo, and draw/close gestures. Bugs 1 and 3 have direct event-level
+  coverage. Simulated
   `mse/->PointerEvent`/`mse/->MouseEvent` sequences remain the right
   next layer.
 - **E2E**: only `frontend/playwright/ui/specs/stroke-to-path.spec.js` touches paths.
@@ -296,6 +298,9 @@ Validation performed for the drawing-copy refactor on 2026-07-10 through Penpot 
 - Bug 1 predicate: the real `workspace.edition/clear-edition-mode` matches
   `finish-edition?`, `:interrupt` does not, main compiler remains `:ok`, and the live
   runtime has no exception.
+- Bug 3 ordering: path clear emits exactly one `finish-path`; at that event edit and
+  drawing state are retained while transient preview/last-point are cleaned; final
+  state removes edition/edit/drawing data. Non-path clear emits no path event.
 - The pnpm unit runner was not executed in that session: pnpm's local store database
   was inaccessible in the sandbox, then the stale install requested a `node_modules`
   purge. Run the focused namespace in a prepared environment before committing.
@@ -311,13 +316,13 @@ Ordered to serve the roadmap in §6:
   `pnpm run test:quiet -- --focus frontend-tests.logic.path-edition-test --log-level warn`.
 - [ ] **Expand the store-driven safety net.** Add pointer sequences for node drag,
   handler drag, arrows, tool operations, path-local undo/redo, Esc, double-click, and
-  switching draw↔move. Add a red test for open bug 3.
+  switching draw↔move.
 - [x] **Fix stale clear-edition event matching (bug 1).** Use the
   `workspace.edition` event keyword consistently in path stream stoppers and draw-loop
   termination.
-- [ ] **Fix open cleanup bug 3.** Either capture the edition id before UpdateEvent
-  cleanup or emit `finish-path` before clearing; wrap data events passed to
-  `rx/concat` in `rx/of`.
+- [x] **Fix post-update cleanup ordering (bug 3).** Capture the active path id before
+  removing `:edition`, emit `finish-path` with `rx/of`, and emit nothing for non-path
+  edition.
 - [ ] **Unify edition stop signals and make deferred ordering explicit.** Replace the
   esc-pressed/`:interrupt`/clear-edition-mode/finish-path split and document or replace
   the load-bearing `observe-on :async` / `delay 0` boundaries.
