@@ -287,11 +287,14 @@
 
         path-editing?     (some? edit-path-state)
         path-drawing?     (or (= edit-path-mode :draw)
-                              (and (= :path (get drawing-obj :type))
+                              (and (nil? edition)
+                                   (= :path (get drawing-obj :type))
                                    (not= :curve drawing-tool)))
 
         editing-shape     (when edition
-                            (get base-objects edition))
+                            (if path-editing?
+                              drawing-obj
+                              (get base-objects edition)))
 
         editing-shape     (mf/with-memo [editing-shape path-editing? base-objects]
                             (if path-editing?
@@ -632,6 +635,17 @@
                               hover-ids hover-top-frame-id @hover-disabled? focus zoom show-measures? read-only? transform)
     (hooks/setup-shortcuts path-editing? path-drawing? text-editing? grid-editing?)
     (hooks/setup-active-frames base-objects hover-ids selected active-frames zoom transform vbox)
+
+    (mf/with-effect [path-editing? edition @initialized?]
+      (when (and path-editing? edition @initialized?)
+        (wasm.api/use-shape edition)
+        (wasm.api/set-shape-hidden true)
+        (wasm.api/request-render "start-path-edition")
+        (fn []
+          (when (wasm.api/initialized?)
+            (wasm.api/use-shape edition)
+            (wasm.api/set-shape-hidden false)
+            (wasm.api/request-render "stop-path-edition")))))
 
     [:div {:class (stl/css :viewport) :style #js {"--zoom" zoom} :data-testid "viewport"}
 

@@ -11,7 +11,6 @@
    [app.common.geom.point :as gpt]
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]
-   [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.path.changes :as changes]
@@ -20,7 +19,6 @@
    [app.main.data.workspace.path.state :as st]
    [app.main.data.workspace.path.streams :as streams]
    [app.main.data.workspace.path.undo :as undo]
-   [app.main.data.workspace.shapes :as dwsh]
    [app.main.streams :as ms]
    [app.util.mouse :as mse]
    [beicon.v2.core :as rx]
@@ -41,10 +39,31 @@
             (update-in [:workspace-local :edit-path id :content-modifiers] merge modifiers)
             (assoc-in [:workspace-local :edit-path id :moving-handler] point))))))
 
+(defn- apply-content-modifiers*
+  [id new-content point-change]
+  (ptk/reify ::apply-content-modifiers*
+    ptk/UpdateEvent
+    (update [_ state]
+      (cond-> (-> state
+                  (st/set-content new-content)
+                  (update-in [:workspace-local :edit-path id]
+                             dissoc
+                             :content-modifiers
+                             :moving-nodes
+                             :moving-handler))
+        (seq new-content)
+        (update-in (st/get-path-location state) path/update-geometry)))
+
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (if (empty? new-content)
+        (rx/of (dwe/clear-edition-mode))
+        (rx/of (selection/update-selection point-change))))))
+
 (defn apply-content-modifiers []
   (ptk/reify ::apply-content-modifiers
     ptk/WatchEvent
-    (watch [it state _]
+    (watch [_ state _]
       (let [id    (st/get-path-id state)
             shape (st/get-path state)
 
@@ -52,10 +71,7 @@
             (dm/get-in state [:workspace-local :edit-path id :content-modifiers])]
         (if (or (nil? shape) (nil? content-modifiers))
           (rx/of (dwe/clear-edition-mode))
-          (let [page-id      (get state :current-page-id state)
-                objects      (dsh/lookup-page-objects state)
-
-                content      (get shape :content)
+          (let [content      (get shape :content)
                 new-content  (path/apply-content-modifiers content content-modifiers)
 
                 old-points   (path/get-points content)
@@ -63,13 +79,7 @@
                 point-change (->> (map hash-map old-points new-points) (reduce merge))]
 
             (when (and (some? new-content) (some? shape))
-              (let [changes (changes/generate-path-changes it objects page-id shape (:content shape) new-content)]
-                (if (empty? new-content)
-                  (rx/of (dch/commit-changes changes)
-                         (dwe/clear-edition-mode))
-                  (rx/of (dch/commit-changes changes)
-                         (selection/update-selection point-change)
-                         (fn [state] (update-in state [:workspace-local :edit-path id] dissoc :content-modifiers :moving-nodes :moving-handler))))))))))))
+              (rx/of (apply-content-modifiers* id new-content point-change)))))))))
 
 (defn modify-content-point
   [content {dx :x dy :y} modifiers point]
@@ -142,7 +152,6 @@
             selected? (contains? selected-points position)]
         (streams/drag-stream
          (rx/of
-          (dwsh/update-shapes [id] path/convert-to-path)
           (when-not selected? (selection/select-node position shift?))
           (drag-selected-points @ms/mouse-position))
          (rx/of (selection/select-node position shift?)))))))
@@ -226,7 +235,6 @@
                   mov-vec (gpt/multiply (get-displacement direction) scale)]
 
               (rx/concat
-               (rx/of (dwsh/update-shapes [id] path/convert-to-path))
                (rx/merge
                 (->> move-events
                      (rx/take-until stopper)
@@ -264,7 +272,6 @@
 
         (streams/drag-stream
          (rx/concat
-          (rx/of (dwsh/update-shapes [id] path/convert-to-path))
           (->> (streams/move-handler-stream handler point handler opposite points)
                (rx/map
                 (fn [{:keys [x y alt? shift?]}]
@@ -294,10 +301,14 @@
     ptk/UpdateEvent
     (update [_ state]
       (let [objects   (dsh/lookup-page-objects state)
-            shape     (get objects id)]
+            shape     (get objects id)
+            shape     (-> shape
+                          (path/convert-to-path objects)
+                          (update :content path/close-subpaths)
+                          (path/update-geometry))]
 
         (-> state
-            (st/set-content (path/close-subpaths (:content shape)))
+            (assoc-in [:workspace-drawing :object] shape)
             (update-in [:workspace-local :edit-path id]
                        (fn [state]
                          (let [state (if state
@@ -311,14 +322,12 @@
 
     ptk/WatchEvent
     (watch [_ _ stream]
-      (let [stopper (rx/filter #(let [type (ptk/type %)]
-                                  (= type ::dwe/clear-edition-mode)
-                                  (= type ::start-path-edit))
-                               stream)]
+      (let [stopper (rx/filter (ptk/type? ::start-path-edit) stream)]
         (rx/concat
          (rx/of (undo/start-path-undo))
          (->> stream
-              (rx/filter #(= % :interrupt))
+              (rx/filter #(or (= % :interrupt)
+                              (= (ptk/type %) ::dwe/clear-edition-mode)))
               (rx/take 1)
               (rx/map #(stop-path-edit id))
               (rx/take-until stopper)))))))
@@ -326,29 +335,27 @@
 (defn stop-path-edit
   [id]
   (ptk/reify ::stop-path-edit
-    ptk/UpdateEvent
-    (update [_ state]
-      (update state :workspace-local dissoc :edit-path id))
-
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (ptk/data-event :layout/update {:ids [id]})))))
+      (rx/of
+       (changes/finalize-path-content id)
+       (fn [state]
+         (-> state
+             (update-in [:workspace-local :edit-path] dissoc id)
+             (update :workspace-drawing dissoc :object :lock)))
+       (ptk/data-event :layout/update {:ids [id]})))))
 
 (defn- split-segments
-  [id {:keys [from-p to-p t]}]
+  [_id {:keys [from-p to-p t]}]
   (ptk/reify ::split-segments
     ptk/UpdateEvent
     (update [_ state]
       (let [content (st/get-path state :content)]
         (-> state
-            (assoc-in [:workspace-local :edit-path id :old-content] content)
             (st/set-content (-> content
                                 (path/split-segments #{from-p to-p} t)
-                                (path/content))))))
-
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (rx/of (changes/save-path-content {:preserve-move-to true})))))
+                                (path/content)))
+            (update-in (st/get-path-location state) path/update-geometry))))))
 
 (defn create-node-at-position
   [params]
@@ -356,5 +363,4 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [id (st/get-path-id state)]
-        (rx/of (dwsh/update-shapes [id] path/convert-to-path)
-               (split-segments id params))))))
+        (rx/of (split-segments id params))))))

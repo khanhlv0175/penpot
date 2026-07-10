@@ -182,11 +182,14 @@
 
         path-editing?     (some? edit-path-state)
         path-drawing?     (or (= edit-path-mode :draw)
-                              (and (= :path (get drawing-obj :type))
+                              (and (nil? edition)
+                                   (= :path (get drawing-obj :type))
                                    (not= :curve drawing-tool)))
 
         editing-shape     (when edition
-                            (get base-objects edition))
+                            (if path-editing?
+                              drawing-obj
+                              (get base-objects edition)))
 
         editing-shape     (mf/with-memo [editing-shape path-editing? base-objects]
                             (if path-editing?
@@ -256,6 +259,11 @@
         show-snap-points?        (and (or (contains? layout :dynamic-alignment)
                                           (contains? layout :snap-guides))
                                       (or drawing-obj transform))
+
+        render-objects           (mf/with-memo [base-objects path-editing? edition]
+                                   (cond-> base-objects
+                                     path-editing?
+                                     (assoc-in [edition :hidden] true)))
         show-selrect?            (and selrect (empty? drawing) (not text-editing?))
         show-measures?           (and (not transform)
                                       (not path-editing?)
@@ -411,7 +419,7 @@
        [:& (mf/provider use/include-metadata-ctx) {:value (dbg/enabled? :show-export-metadata)}
         ;; Render root shape
         [:& shapes/root-shape {:key (str page-id)
-                               :objects base-objects
+                               :objects render-objects
                                :active-frames @active-frames
                                ;; disable thumbnails when previewing a version
                                :disable-thumbnails (some? preview-id)}]]]]

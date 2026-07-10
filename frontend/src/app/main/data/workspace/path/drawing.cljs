@@ -20,13 +20,12 @@
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.pages :as-alias dwpg]
-   [app.main.data.workspace.path.changes :as changes]
    [app.main.data.workspace.path.common :as common]
+   [app.main.data.workspace.path.edition :as edition]
    [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.state :as st]
    [app.main.data.workspace.path.streams :as streams]
    [app.main.data.workspace.path.undo :as undo]
-   [app.main.data.workspace.shapes :as dwsh]
    [app.util.mouse :as mse]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -34,6 +33,15 @@
 (declare close-path-drag-end)
 (declare check-changed-content)
 (declare change-edit-mode)
+
+(defn start-created-path-edition
+  [id]
+  (ptk/reify ::start-created-path-edition
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (dwe/start-edition-mode id)
+             (edition/start-path-edit id)
+             (change-edit-mode :draw)))))
 
 (defn- end-path-event?
   [event]
@@ -316,8 +324,7 @@
         (if (> (count content) 1)
           (rx/of (setup-frame)
                  (dwdc/handle-finish-drawing)
-                 (dwe/start-edition-mode shape-id)
-                 (change-edit-mode :draw))
+                 (start-created-path-edition shape-id))
           (rx/of (dwdc/handle-finish-drawing)))))))
 
 (defn handle-drawing
@@ -349,10 +356,20 @@
     (update [_ state]
       (let [id      (dm/get-in state [:workspace-local :edition])
             objects (dsh/lookup-page-objects state)
-            content (dm/get-in objects [id :content])]
-        (if content
-          (update-in state [:workspace-local :edit-path id] assoc :old-content content)
-          state)))
+            shape   (get objects id)
+            drawing (dm/get-in state [:workspace-drawing :object])
+            drawing (or drawing
+                        (some-> shape
+                                (path/convert-to-path objects)
+                                (update :content path/close-subpaths)
+                                (path/update-geometry)))]
+        (cond-> state
+          drawing
+          (assoc-in [:workspace-drawing :object] drawing)
+
+          (and drawing
+               (nil? (dm/get-in state [:workspace-local :edit-path id :old-content])))
+          (assoc-in [:workspace-local :edit-path id :old-content] (:content drawing)))))
 
     ptk/WatchEvent
     (watch [_ _ _]
@@ -369,7 +386,6 @@
 
         (if (= :draw mode)
           (rx/concat
-           (rx/of (dwsh/update-shapes [id] path/convert-to-path))
            (rx/of (start-edition id))
            (->> stream
                 (rx/filter (ptk/type? ::end-edition))
@@ -418,7 +434,7 @@
 
         (cond
           (and (not= content old-content) (not empty-content?))
-          (rx/of (changes/save-path-content))
+          (rx/empty)
 
           (= mode :draw)
           (rx/of :interrupt)

@@ -8,12 +8,8 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.types.path :as path]
-   [app.main.data.changes :as dch]
-   [app.main.data.helpers :as dsh]
    [app.main.data.workspace.edition :as dwe]
-   [app.main.data.workspace.path.changes :as changes]
    [app.main.data.workspace.path.state :as st]
-   [app.main.data.workspace.shapes :as dwsh]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -23,13 +19,10 @@
    (process-path-tool nil tool-fn))
   ([points tool-fn]
    (ptk/reify ::process-path-tool
-     ptk/WatchEvent
-     (watch [it state _]
-       (let [page-id (get state :current-page-id)
-             objects (dsh/lookup-page-objects state page-id)
-
-             shape   (st/get-path state)
-             id      (st/get-path-id state)
+     ptk/UpdateEvent
+     (update [_ state]
+       (let [shape (st/get-path state)
+             id    (st/get-path-id state)
 
              selected-points
              (dm/get-in state [:workspace-local :edit-path id :selected-points] #{})
@@ -37,19 +30,19 @@
              points
              (or points selected-points)]
 
-         (when (and (seq points) (some? shape))
+         (if (and (seq points) (some? shape))
            (let [new-content
                  (-> (tool-fn (:content shape) points)
-                     (path/close-subpaths))
+                     (path/close-subpaths))]
+             (cond-> (st/set-content state new-content)
+               (seq new-content)
+               (update-in (st/get-path-location state) path/update-geometry)))
+           state)))
 
-                 changes
-                 (changes/generate-path-changes it objects page-id shape (:content shape) new-content)]
-
-             (rx/concat
-              (rx/of (dwsh/update-shapes [id] path/convert-to-path)
-                     (dch/commit-changes changes))
-              (when (empty? new-content)
-                (rx/of (dwe/clear-edition-mode)))))))))))
+     ptk/WatchEvent
+     (watch [_ state _]
+       (when (empty? (st/get-path state :content))
+         (rx/of (dwe/clear-edition-mode)))))))
 
 (defn make-corner
   ([]

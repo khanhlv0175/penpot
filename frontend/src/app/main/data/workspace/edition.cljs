@@ -51,11 +51,17 @@
   (ptk/reify ::clear-edition-mode
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (update :workspace-local dissoc :edition :edit-path)
-          (update :workspace-drawing dissoc :object :lock)
-          (dissoc :workspace-grid-edition)
-          (dissoc :workspace-wasm-editor-styles)))
+      (let [edition-id    (get-in state [:workspace-local :edition])
+            path-editing? (some? (get-in state [:workspace-local :edit-path edition-id]))]
+        (-> state
+            (update :workspace-local dissoc :edition)
+            (cond-> (not path-editing?)
+              (update :workspace-local dissoc :edit-path)
+
+              (not path-editing?)
+              (update :workspace-drawing dissoc :object :lock))
+            (dissoc :workspace-grid-edition)
+            (dissoc :workspace-wasm-editor-styles))))
 
     ptk/WatchEvent
     (watch [_ state _]
@@ -70,4 +76,3 @@
         ;; NOTE: the WASM text editor is disposed by the v3 editor component on
         ;; unmount, *after* it finalizes its content.
         (wasm.api/request-render "clear-edition-mode")))))
-

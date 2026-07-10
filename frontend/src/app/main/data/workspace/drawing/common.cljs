@@ -23,9 +23,17 @@
    (ptk/reify ::clear-drawing
      ptk/UpdateEvent
      (update [_ state]
-       (if preserve-tool?
-         (update state :workspace-drawing dissoc :object :lock)
-         (dissoc state :workspace-drawing))))))
+       (let [edition-id    (get-in state [:workspace-local :edition])
+             path-editing? (some? (get-in state [:workspace-local :edit-path edition-id]))]
+         (cond
+           path-editing?
+           (update state :workspace-drawing select-keys [:object])
+
+           preserve-tool?
+           (update state :workspace-drawing dissoc :object :lock)
+
+           :else
+           (dissoc state :workspace-drawing)))))))
 
 (defn handle-finish-drawing
   []

@@ -12,16 +12,12 @@
 (defn get-path-id
   "Retrieves the currently editing path id"
   [state]
-  (or (dm/get-in state [:workspace-local :edition])
-      (dm/get-in state [:workspace-drawing :object :id])))
+  (or (dm/get-in state [:workspace-drawing :object :id])
+      (dm/get-in state [:workspace-local :edition])))
 
 (defn get-path-location
-  [state & ks]
-  (if-let [edit-id (dm/get-in state [:workspace-local :edition])]
-    (let [page-id  (:current-page-id state)
-          file-id  (:current-file-id state)]
-      (into [:files file-id :data :pages-index page-id :objects edit-id] ks))
-    (into [:workspace-drawing :object] ks)))
+  [_state & ks]
+  (into [:workspace-drawing :object] ks))
 
 (defn get-path
   "Retrieves the location of the path object and additionally can pass
