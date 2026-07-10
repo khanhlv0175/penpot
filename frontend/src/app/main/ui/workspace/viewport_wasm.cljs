@@ -375,6 +375,7 @@
         show-snap-points?        (and (or (contains? layout :dynamic-alignment)
                                           (contains? layout :snap-guides))
                                       (or drawing-obj transform)
+                                      (not path-editing?)
                                       (not page-transition?))
         show-selrect?            (and selrect (empty? drawing) (not text-editing?) (not page-transition?))
         show-measures?           (and (not transform)

@@ -7,6 +7,10 @@ findings also lives in Serena memory
 `frontend/path-editor-architecture-and-event-ordering`; treat this document as newer
 when they differ.
 
+Only track bugs that predate this branch in the bugs checklist. Regressions introduced
+and fixed within this branch belong in the implementation/validation notes, not as
+numbered bugs.
+
 The original investigation was done on branch `alotor-plugin-api-contributions`.
 The implementation described in the completed checklist items below is in the working
 tree on branch `piweek-path-editor-enhancements` as of 2026-07-10. Do not assume it is
@@ -36,7 +40,8 @@ UI:
   handlers call `stop-propagation` and emit the drp events directly. Also installs a raw
   DOM `dblclick` listener that emits `:interrupt` in `:move` mode.
 - `frontend/src/app/main/ui/workspace/viewport/drawarea.cljs` — mounts `path-editor*`
-  with a derived lens on `[:edit-path id]`.
+  with a derived lens on `[:edit-path id]`. Path-shaped drawing copies with no active
+  drawing tool render their shape but skip the generic bounding-box outline.
 - `frontend/src/app/main/ui/workspace/viewport/actions.cljs` — viewport pointer entry:
   emits `mse/->MouseEvent :down/:up/:click/:double-click` and one
   `mse/->PointerEvent :viewport` per pointermove into the potok store; when

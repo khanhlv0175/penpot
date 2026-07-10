@@ -59,8 +59,15 @@
    [:g {:style {:pointer-events "none"}}
     [:& shapes/shape-wrapper {:shape shape}]]
 
-   (case tool
-     :path      [:> path-draw-area* props]
-     :curve     [:& path-shape {:shape shape :zoom zoom}]
-     #_:default [:> generic-draw-area* props])])
+   (cond
+     (= tool :path)
+     [:> path-draw-area* props]
 
+     (= tool :curve)
+     [:& path-shape {:shape shape :zoom zoom}]
+
+     (= (:type shape) :path)
+     nil
+
+     :else
+     [:> generic-draw-area* props])])

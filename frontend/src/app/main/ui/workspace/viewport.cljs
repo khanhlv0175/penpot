@@ -258,7 +258,8 @@
                                       (seq selected))
         show-snap-points?        (and (or (contains? layout :dynamic-alignment)
                                           (contains? layout :snap-guides))
-                                      (or drawing-obj transform))
+                                      (or drawing-obj transform)
+                                      (not path-editing?))
 
         render-objects           (mf/with-memo [base-objects path-editing? edition]
                                    (cond-> base-objects
