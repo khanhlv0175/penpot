@@ -518,3 +518,65 @@ Ordered to serve the roadmap in §6:
 - Lint/format from `frontend/`: `pnpm run lint:clj`, `pnpm run check-fmt:clj`; run
   `tools/paren-repair.bb` first if delimiter errors are suspected. Commit only when
   explicitly asked.
+
+## 10. Stable node identity refactor (completed 2026-07-10, commit `6f03049135`)
+
+Groundwork for roadmap features 1–3. Replaces position-based node identity with stable
+content-command indices and scaffolds a unified node/segment/handler selection model.
+Scope decisions (confirmed with the user): **nodes end-to-end + scaffold** segments/
+handlers (their drag-select interaction is deferred to feature 3), and the common-layer
+tool fns stay position-based with **conversion at the boundary**.
+
+### Identity model
+- **Node = content command index.** Position is derived on demand
+  (`helpers/node-position` = `segment->point (nth content i)`). This is unambiguous even
+  with duplicate coordinates or `close-path` (which `get-points` skips), unlike the old
+  position keys.
+- **Handler = `[command-index prefix]`** (`:c1`/`:c2`), unchanged.
+- **Segment = the drawing command's index** (scaffolded, not yet interactive).
+- Indices are invariant under moves and shift only on structural edits.
+
+### State (`[:workspace-local :edit-path id]`)
+`:selected-points`→`:selected-nodes` (index set); `:hover-points`→`:hover-nodes`; new
+`:selected-segments`/`:selected-handlers`. `start-path-edit` initialises the three
+`:selected-*` sets (the old stray `:selected` key is gone).
+
+### New pure helpers (`data/workspace/path/helpers.cljs`)
+`node?`, `node-indices`, `node-position`, `node-positions`, `nodes-in-rect`,
+`remap-selected-nodes` (re-resolves indices against new content by matching old selected
+positions — the one position→index remap done at commit time).
+
+### Remap policy
+Moves keep indices, so the per-move `selection/update-selection` remap was **removed**
+(`apply-content-modifiers*` no longer computes a point-change). Only `process-path-tool`
+remaps, once, after the structural change. `selection/update-selection` is deleted.
+
+### Files touched
+- `helpers.cljs` — new identity helpers (adds `app.common.data`, `geom.shapes` requires).
+- `selection.cljs` — hover/select/area-select/deselect are index-based
+  (`nodes-in-rect`); `update-selection` removed; drops `gpt`/`gsh` requires.
+- `edition.cljs` — drag/arrow/`start-move-path-point` take/derive indices;
+  `apply-content-modifiers[*]` no longer remaps selection.
+- `tools.cljs` — `process-path-tool` converts indices→positions for the common fns and
+  remaps `:selected-nodes` afterwards.
+- `editor.cljs` — renders each node from its index; `point->base`/`base->point` and the
+  `map-invert` require are gone; `path-point*` gains `:index` and emits index-based
+  hover/select.
+- `path_actions.cljs` — `check-enabled` stays position-based, fed derived positions.
+
+### Boundary conversion (still position-based, indices→positions at the edge)
+`move-selected-path-point`, `drag-selected-points`, `move-selected` (arrows),
+`streams/move-points-stream`, `snap/create-ranges`, and `path-actions/check-enabled`.
+Consequence: the duplicate-coordinate collapse persists **only** inside those
+position-based common fns (no worse than before); a later pass can push indices into the
+common tool fns to remove it.
+
+### Verification
+Live (real gestures + store inspection): click/shift-click select (correct indices),
+rubber-band area-select, node drag (index stable across the move, no remap), `make-curve`
+(selection kept), `remove-node` (selection remapped, removed node dropped), arrow move.
+Focused unit suite 14/14; `cljfmt` clean; `clj-kondo` 0/0; build `:ok`.
+
+### Remaining for features 1–3
+Wire the segment + handler **selection interaction** (click and drag-select), segment
+hit-testing + rendering in `path-editor*`, and optionally index-based common tool fns.
