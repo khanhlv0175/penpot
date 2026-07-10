@@ -337,11 +337,26 @@ Work planned on top of the polished editor, with required groundwork:
    endpoint nodes of every selected segment, including their anchored Bézier handlers.
    The insertion preview is disabled for now, so clicking a segment selects it instead
    of creating a node.
-- [ ] **Feature 2 — copy/paste of nodes and segments.** Needs a serializable selection (again indices,
-   not positions-with-metadata) and common-layer functions to extract a sub-content
-   (subset of segments/nodes → valid new `PathData` with move-to normalization) and to
-   splice content in. Clipboard plumbing follows the existing workspace copy/paste
-   flows. Groundwork: stable identity + `common.types.path` extract/splice API.
+- [x] **Feature 2 — copy/paste of nodes and segments.** Completed 2026-07-11. Common
+   layer: `segment-entries` moved into `common.types.path.segment` (frontend
+   `helpers/segment-entries` now delegates), plus `path/extract-content` (selected
+   segments + segments whose two endpoint nodes are selected → chained subpaths with
+   move-to normalization; a trailing line-to landing on its subpath start becomes an
+   explicit close-path) and `path/splice-content`. Frontend:
+   `data/workspace/path/clipboard.cljs` — `copy-selected-nodes` writes
+   `{:type :copied-path-content :content <PathData>}` as transit to the system
+   clipboard (PathData has transit handlers); `paste-nodes` reads the clipboard,
+   ignores anything that is not that payload, cancels a pending draw segment, and
+   `paste-content` splices in place, offsetting by +10/+10 until no pasted node
+   coincides with an existing node position (the position-based move pipeline would
+   otherwise drag original and pasted nodes together — found live), selects the pasted
+   node indices, and switches to `:move` mode. Bound to mod+C/mod+V in the path
+   shortcuts (only active during path edition; the generic workspace paste ignores the
+   payload type, so pasting outside the editor is a silent no-op for now). Verified
+   live end-to-end with real gestures: node-pair copy, segment copy, paste+drag moves
+   only the pasted fragment, text-clipboard paste is a no-op while editing,
+   empty-selection copy leaves the clipboard untouched, and exit persists one commit
+   with the new subpaths.
 - [x] **Feature 3 — drag selection of segments, nodes and handlers.** Completed
    2026-07-10. The marquee computes all three identity sets once per animation frame.
    Nodes and visible handler control points use rect containment; lines and approximated

@@ -15,6 +15,7 @@
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.path.changes :as path.changes]
+   [app.main.data.workspace.path.clipboard :as path.clipboard]
    [app.main.data.workspace.path.common :as path.common]
    [app.main.data.workspace.path.drawing :as path.drawing]
    [app.main.data.workspace.path.edition :as path.edition]
@@ -539,3 +540,37 @@
     (t/is (= {:c1x 3 :c1y 4} (get modifiers 2)))
     (t/is (nil? (get modifiers 1)))
     (t/is (nil? (get modifiers 9)))))
+
+(t/deftest pasting-path-content-splices-and-selects-new-nodes
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{1}
+                                         :segments #{}
+                                         :handlers #{}})
+        sub      [{:command :move-to :params {:x 30 :y 30}}
+                  {:command :line-to :params {:x 40 :y 30}}]
+        state'   (ptk/update (path.clipboard/paste-content sub) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    (t/is (= (into (vec content) sub) (vec content')))
+    (t/is (= {:nodes #{3 4}
+              :segments #{}
+              :handlers #{}}
+             (get-in state' [:workspace-local :edit-path id :selection])))))
+
+(t/deftest pasting-over-identical-nodes-offsets-the-fragment
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content path.helpers/empty-selection)
+        ;; Same coordinates as the existing segment between nodes 0 and 1
+        sub      [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :curve-to :params {:c1x 2 :c1y 0
+                                               :c2x 8 :c2y 0
+                                               :x 10 :y 0}}]
+        state'   (ptk/update (path.clipboard/paste-content sub) state)
+        content' (vec (get-in state' [:workspace-drawing :object :content]))
+        pasted   (subvec content' 3)]
+    ;; The pasted nodes cannot collide with existing node positions, so the
+    ;; position-based move pipeline never drags original and pasted together
+    (t/is (= {:x 10 :y 10} (select-keys (:params (first pasted)) [:x :y])))
+    (t/is (= {:x 20 :y 10} (select-keys (:params (second pasted)) [:x :y])))))

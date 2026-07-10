@@ -94,6 +94,16 @@
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/toggle-snap))}
 
+   :copy            {:tooltip (ds/meta "C")
+                     :command (ds/c-mod "c")
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/copy-selected-nodes))}
+
+   :paste           {:tooltip (ds/meta "V")
+                     :command (ds/c-mod "v")
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/paste-nodes))}
+
    :escape          {:tooltip (ds/esc)
                      :command ["escape" "enter" "v"]
                      :fn #(st/emit! (esc-pressed))}

@@ -209,6 +209,77 @@
   (let [content (impl/path-data content)]
     (segment/get-points content)))
 
+(defn segment-entries
+  "Selectable path segments with their command index and endpoints."
+  [content]
+  (let [content (impl/path-data content)]
+    (segment/segment-entries content)))
+
+(defn- close-extracted-loops
+  "Turns a trailing line-to that lands exactly on its subpath start into an
+  explicit close-path, so a fully extracted loop stays a closed subpath with
+  a single start node."
+  [plain]
+  (let [total (count plain)]
+    (loop [index  0
+           start  nil
+           result []]
+      (if (< index total)
+        (let [{:keys [command params] :as cmd} (nth plain index)
+              start (if (= :move-to command) params start)
+              last-of-subpath?
+              (or (= (inc index) total)
+                  (= :move-to (:command (nth plain (inc index)))))
+              cmd   (if (and last-of-subpath?
+                             (= :line-to command)
+                             (= (:x params) (:x start))
+                             (= (:y params) (:y start)))
+                      {:command :close-path :params {}}
+                      cmd)]
+          (recur (inc index) start (conj result cmd)))
+        result))))
+
+(defn extract-content
+  "Builds a new content from the sub-paths induced by the given selection of
+  node and segment indices: the explicitly selected segments plus the
+  segments whose two endpoint nodes are selected. Consecutive selected
+  segments chain into a single subpath and every break starts a new subpath
+  with a move-to; fully copied loops are closed again."
+  [content {:keys [nodes segments]}]
+  (let [content   (impl/path-data content)
+        nodes     (or nodes #{})
+        segments  (or segments #{})
+        selected? (fn [{:keys [index from-index to-index]}]
+                    (or (contains? segments index)
+                        (and (contains? nodes from-index)
+                             (contains? nodes to-index))))
+        entries   (filterv selected? (segment/segment-entries content))
+        plain     (loop [entries (seq entries)
+                         prev    nil
+                         result  []]
+                    (if-let [{:keys [from from-index to segment] :as entry} (first entries)]
+                      (let [result (cond-> result
+                                     (not= from-index (:to-index prev))
+                                     (conj {:command :move-to
+                                            :params {:x (:x from) :y (:y from)}}))
+                            result (conj result
+                                         (if (= :close-path (:command segment))
+                                           {:command :line-to
+                                            :params {:x (:x to) :y (:y to)}}
+                                           segment))]
+                        (recur (next entries) entry result))
+                      result))]
+    (-> (close-subpaths (impl/path-data plain))
+        (vec)
+        (close-extracted-loops)
+        (impl/path-data))))
+
+(defn splice-content
+  "Appends the given sub-content (subpaths starting with a move-to) to the
+  content as new subpaths."
+  [content sub-content]
+  (impl/path-data (into (vec content) (vec sub-content))))
+
 (defn calc-selrect
   "Calculate selrect from a content. The content can be in a PathData
   instance or plain vector of segments."

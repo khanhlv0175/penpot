@@ -1592,3 +1592,70 @@
                                           [])]
         (t/is (= max-safe (:x move-res)) "reduce first x should be clamped")
         (t/is (= min-safe (:y move-res)) "reduce first y should be clamped")))))
+
+(t/deftest segment-entries-identity
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}
+                 {:command :curve-to :params {:c1x 12.0 :c1y 0.0 :c2x 18.0 :c2y 0.0 :x 20.0 :y 0.0}}
+                 {:command :close-path :params {}}
+                 {:command :move-to :params {:x 30.0 :y 30.0}}
+                 {:command :line-to :params {:x 40.0 :y 30.0}}]
+        entries (path/segment-entries content)]
+    (t/is (= [1 2 3 5] (mapv :index entries)))
+    ;; The closing segment goes back to the subpath start node
+    (t/is (= 0 (:to-index (nth entries 2))))
+    (t/is (= (gpt/point 0.0 0.0) (:to (nth entries 2))))
+    ;; The second subpath starts from its own move-to
+    (t/is (= 4 (:from-index (nth entries 3))))))
+
+(t/deftest extract-content-chains-and-breaks
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}
+                 {:command :line-to :params {:x 30.0 :y 0.0}}
+                 {:command :line-to :params {:x 40.0 :y 0.0}}]]
+    ;; Adjacent selected segments chain into one subpath
+    (t/is (= [{:command :move-to :params {:x 10.0 :y 0.0}}
+              {:command :line-to :params {:x 20.0 :y 0.0}}
+              {:command :line-to :params {:x 30.0 :y 0.0}}]
+             (vec (path/extract-content content {:segments #{2 3}}))))
+    ;; A gap starts a new subpath
+    (t/is (= [{:command :move-to :params {:x 0.0 :y 0.0}}
+              {:command :line-to :params {:x 10.0 :y 0.0}}
+              {:command :move-to :params {:x 30.0 :y 0.0}}
+              {:command :line-to :params {:x 40.0 :y 0.0}}]
+             (vec (path/extract-content content {:segments #{1 4}}))))))
+
+(t/deftest extract-content-from-selected-nodes
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}
+                 {:command :curve-to :params {:c1x 12.0 :c1y 0.0 :c2x 18.0 :c2y 0.0 :x 20.0 :y 0.0}}
+                 {:command :line-to :params {:x 30.0 :y 0.0}}]]
+    ;; Segments whose two endpoint nodes are selected are included
+    (t/is (= [{:command :move-to :params {:x 10.0 :y 0.0}}
+              {:command :curve-to :params {:c1x 12.0 :c1y 0.0 :c2x 18.0 :c2y 0.0 :x 20.0 :y 0.0}}]
+             (vec (path/extract-content content {:nodes #{1 2}}))))
+    ;; A single selected node produces no content
+    (t/is (empty? (path/extract-content content {:nodes #{1}})))
+    ;; Non-adjacent selected nodes produce no content
+    (t/is (empty? (path/extract-content content {:nodes #{0 2}})))))
+
+(t/deftest extract-content-closes-full-loops
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 10.0}}
+                 {:command :close-path :params {}}]
+        result  (vec (path/extract-content content {:nodes #{0 1 2}}))]
+    (t/is (= :move-to (:command (nth result 0))))
+    (t/is (= :line-to (:command (nth result 1))))
+    (t/is (= :line-to (:command (nth result 2))))
+    (t/is (= :close-path (:command (nth result 3))))))
+
+(t/deftest splice-content-appends-subpaths
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}]
+        sub     [{:command :move-to :params {:x 30.0 :y 30.0}}
+                 {:command :line-to :params {:x 40.0 :y 30.0}}]
+        result  (path/splice-content content sub)]
+    (t/is (path.impl/path-data? result))
+    (t/is (= (into (vec content) sub) (vec result)))))

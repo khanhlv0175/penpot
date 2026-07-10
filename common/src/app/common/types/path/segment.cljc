@@ -139,6 +139,44 @@
                     (gpt/point x y)))
                 [])))
 
+(defn segment-entries
+  "Selectable path segments with their command index and endpoints. The
+  command index is the segment identity; move-to commands do not produce a
+  segment, while close-path commands represent the closing straight line."
+  [content]
+  (loop [index               0
+         pending             (seq content)
+         previous            nil
+         previous-index      nil
+         subpath-start       nil
+         subpath-start-index nil
+         result              []]
+    (if-let [{:keys [command] :as segment} (first pending)]
+      (let [close-path?         (= command :close-path)
+            move-to?            (= command :move-to)
+            point               (if close-path?
+                                  subpath-start
+                                  (helpers/segment->point segment))
+            point-index         (if close-path? subpath-start-index index)
+            result              (cond-> result
+                                  (and previous point (not move-to?))
+                                  (conj {:index index
+                                         :from previous
+                                         :from-index previous-index
+                                         :to point
+                                         :to-index point-index
+                                         :segment segment}))
+            subpath-start       (if move-to? point subpath-start)
+            subpath-start-index (if move-to? index subpath-start-index)]
+        (recur (inc index)
+               (next pending)
+               point
+               point-index
+               subpath-start
+               subpath-start-index
+               result))
+      result)))
+
 ;; FIXME: incorrect API, don't need full shape
 (defn path->lines
   "Given a path returns a list of lines that approximate the path"

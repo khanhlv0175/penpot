@@ -7,6 +7,7 @@
 (ns app.main.data.workspace.path
   (:require
    [app.common.data.macros :as dm]
+   [app.main.data.workspace.path.clipboard :as clipboard]
    [app.main.data.workspace.path.drawing :as drawing]
    [app.main.data.workspace.path.edition :as edition]
    [app.main.data.workspace.path.selection :as selection]
@@ -27,6 +28,10 @@
 (dm/export edition/start-path-edit)
 (dm/export edition/create-node-at-position)
 (dm/export edition/move-selected)
+
+;; Clipboard
+(dm/export clipboard/copy-selected-nodes)
+(dm/export clipboard/paste-nodes)
 
 ;; Selection
 (dm/export selection/handle-area-selection)
