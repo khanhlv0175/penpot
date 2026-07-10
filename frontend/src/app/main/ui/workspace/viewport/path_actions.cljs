@@ -69,9 +69,11 @@
 
 (mf/defc path-actions*
   [{:keys [shape state]}]
-  (let [{:keys [edit-mode selected-nodes snap-toggled]} state
+  (let [{:keys [edit-mode selection snap-toggled]} state
 
         content (:content shape)
+
+        selected-nodes (get selection :nodes #{})
 
         enabled-buttons
         (mf/use-memo

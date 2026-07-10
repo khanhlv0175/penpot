@@ -31,7 +31,7 @@
              old-content (:content shape)
 
              selected-nodes
-             (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+             (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
 
              points
              (or points (helpers/node-positions old-content selected-nodes))]
@@ -43,7 +43,7 @@
              (-> (cond-> (st/set-content state new-content)
                    (seq new-content)
                    (update-in (st/get-path-location state) path/update-geometry))
-                 (update-in [:workspace-local :edit-path id :selected-nodes]
+                 (update-in [:workspace-local :edit-path id :selection :nodes]
                             #(helpers/remap-selected-nodes (or % #{}) old-content new-content))))
            state)))
 

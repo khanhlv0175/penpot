@@ -67,9 +67,9 @@ Geometry/content model: `common/src/app/common/types/path.cljc` plus
 ## 2. Ephemeral edit state
 
 `[:workspace-local :edit-path <shape-id>]` keys: `:edit-mode` (`:draw`/`:move`),
-`:selected-nodes`/`:selected-segments` (sets of *content command indices*),
-`:selected-handlers` (set of `[index prefix]`), `:hover-nodes` (indices),
-`:hover-handlers` (`[index prefix]`), `:content-modifiers` (index → dx/dy/c1x… deltas applied at render
+`:selection` and `:hover` — each a single grouped map
+`{:nodes #{index} :segments #{index} :handlers #{[index prefix]}}`
+(`helpers/empty-selection` is the empty value); `:content-modifiers` (index → dx/dy/c1x… deltas applied at render
 and then materialized into drawing content), `:moving-nodes`, `:moving-handler`,
 `:drag-handler`, `:prev-handler`,
 `:last-point`, `:preview` (next-segment preview), `:snap-toggled`, `:old-content`
@@ -537,9 +537,14 @@ tool fns stay position-based with **conversion at the boundary**.
 - Indices are invariant under moves and shift only on structural edits.
 
 ### State (`[:workspace-local :edit-path id]`)
-`:selected-points`→`:selected-nodes` (index set); `:hover-points`→`:hover-nodes`; new
-`:selected-segments`/`:selected-handlers`. `start-path-edit` initialises the three
-`:selected-*` sets (the old stray `:selected` key is gone).
+Selection and hover are each a single grouped map
+`{:nodes #{index} :segments #{index} :handlers #{[index prefix]}}`, stored under
+`:selection` and `:hover` (empty value = `helpers/empty-selection`). `start-path-edit`
+initialises both; `deselect-all` resets `:selection` to the empty map; `:segments` is
+scaffolded (not yet interactive). This replaced the flat `:selected-points`/
+`:hover-points` (positions) → `:selected-nodes`… (three parallel keys) → the current
+unified maps, so per-type reads are `(get-in … [:selection :nodes])` and type-agnostic
+ops touch one value.
 
 ### New pure helpers (`data/workspace/path/helpers.cljs`)
 `node?`, `node-indices`, `node-position`, `node-positions`, `nodes-in-rect`,

@@ -93,6 +93,13 @@
 ;; (two nodes at the same coordinates were indistinguishable) is avoided.
 ;; `close-path` commands are not selectable nodes: their endpoint is the subpath
 ;; start and they carry no anchor of their own.
+;;
+;; Selection and hover are each a single grouped map of index sets:
+;;   {:nodes #{index} :segments #{index} :handlers #{[index prefix]}}
+;; stored at [... :edit-path id :selection] and [... :edit-path id :hover].
+
+(def empty-selection
+  {:nodes #{} :segments #{} :handlers #{}})
 
 (defn node?
   "True when the command at the given content index is a selectable node."

@@ -127,7 +127,7 @@
 
             modifiers-reducer (partial modify-content-point content delta)
 
-            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
             points (helpers/node-positions content selected-nodes)
 
             modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
@@ -146,7 +146,7 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [id (dm/get-in state [:workspace-local :edition])
-            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
             selected? (contains? selected-nodes index)]
         (streams/drag-stream
          (rx/of
@@ -165,7 +165,7 @@
 
             content (st/get-path state :content)
 
-            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
             selected-points (helpers/node-positions content selected-nodes)
 
             start-position (apply min-key #(gpt/distance start-position %) selected-points)
@@ -223,7 +223,7 @@
           ;; id can be null if we just selected the tool but we didn't start drawing
           (if (and id (= same-event current-move))
             (let [content        (st/get-path state :content)
-                  selected-nodes (dm/get-in state [:workspace-local :edit-path id :selected-nodes] #{})
+                  selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
                   points         (helpers/node-positions content selected-nodes)
 
                   move-events (->> stream
@@ -318,9 +318,8 @@
                                          (assoc state :edit-mode :draw)
                                          state)
                                        {:edit-mode :move
-                                        :selected-nodes #{}
-                                        :selected-segments #{}
-                                        :selected-handlers #{}
+                                        :selection helpers/empty-selection
+                                        :hover helpers/empty-selection
                                         :snap-toggled false})]
                            (assoc state :old-content (:content shape))))))))
 

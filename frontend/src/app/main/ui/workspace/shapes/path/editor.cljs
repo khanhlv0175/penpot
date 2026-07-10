@@ -277,19 +277,16 @@
                 preview
                 content-modifiers
                 last-point
-                selected-nodes
+                selection
                 moving-nodes
                 moving-handler
-                hover-handlers
-                hover-nodes
+                hover
                 snap-toggled]}
         state
 
-        selected-nodes
-        (or selected-nodes #{})
-
-        hover-nodes
-        (or hover-nodes #{})
+        selected-nodes (get selection :nodes #{})
+        hover-nodes    (get hover :nodes #{})
+        hover-handlers (get hover :handlers #{})
 
         base-content
         (get shape :content)
