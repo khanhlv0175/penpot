@@ -44,45 +44,87 @@
       (let [id (st/get-path-id state)]
         (update-in state [:workspace-local :edit-path id :hover :handlers] disj [index prefix])))))
 
-(defn select-node-area
-  [initial-set remove?]
-  (ptk/reify ::select-node-area
+(defn path-segment-enter [index]
+  (ptk/reify ::path-segment-enter
     ptk/UpdateEvent
     (update [_ state]
-      (let [selrect (dm/get-in state [:workspace-local :selrect])
-            id      (dm/get-in state [:workspace-local :edition])
-            content (st/get-path state :content)
+      (let [id (st/get-path-id state)]
+        (update-in state [:workspace-local :edit-path id :hover :segments] (fnil conj #{}) index)))))
 
-            in-rect (if (some? selrect)
-                      (helpers/nodes-in-rect content selrect)
-                      #{})
+(defn path-segment-leave [index]
+  (ptk/reify ::path-segment-leave
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (update-in state [:workspace-local :edit-path id :hover :segments] disj index)))))
 
-            nodes   (if remove?
-                      (apply disj initial-set in-rect)
-                      (into initial-set in-rect))]
+(defn- select-element
+  [state type identity shift?]
+  (let [id        (dm/get-in state [:workspace-local :edition])
+        selection (dm/get-in state [:workspace-local :edit-path id :selection]
+                             helpers/empty-selection)
+        selected  (get selection type #{})
+        selection (cond
+                    (and shift? (contains? selected identity))
+                    (update selection type disj identity)
 
-        (cond-> state
-          (some? id)
-          (assoc-in [:workspace-local :edit-path id :selection :nodes] nodes))))))
+                    shift?
+                    (update selection type (fnil conj #{}) identity)
+
+                    :else
+                    (assoc helpers/empty-selection type #{identity}))]
+    (cond-> state
+      (some? id)
+      (assoc-in [:workspace-local :edit-path id :selection] selection))))
 
 (defn select-node [index shift?]
   (ptk/reify ::select-node
     ptk/UpdateEvent
     (update [_ state]
-      (let [id    (dm/get-in state [:workspace-local :edition])
-            nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
-            nodes (cond
-                    (and shift? (contains? nodes index))
-                    (disj nodes index)
+      (select-element state :nodes index shift?))))
 
-                    shift?
-                    (conj nodes index)
+(defn select-segment [index shift?]
+  (ptk/reify ::select-segment
+    ptk/UpdateEvent
+    (update [_ state]
+      (select-element state :segments index shift?))))
 
-                    :else
-                    #{index})]
-        (cond-> state
-          (some? id)
-          (assoc-in [:workspace-local :edit-path id :selection :nodes] nodes))))))
+(defn select-handler [index prefix shift?]
+  (ptk/reify ::select-handler
+    ptk/UpdateEvent
+    (update [_ state]
+      (select-element state :handlers [index prefix] shift?))))
+
+(defn- update-area-set
+  [initial-set in-rect remove?]
+  (if remove?
+    (apply disj initial-set in-rect)
+    (into initial-set in-rect)))
+
+(defn select-path-area
+  [rect initial-selection remove?]
+  (ptk/reify ::select-path-area
+    ptk/UpdateEvent
+    (update [_ state]
+      (if-not (grc/rect? rect)
+        state
+        (let [id       (dm/get-in state [:workspace-local :edition])
+              content  (st/get-path state :content)
+              in-rect  {:nodes (helpers/nodes-in-rect content rect)
+                        :segments (helpers/segments-in-rect content rect)
+                        :handlers (helpers/handlers-in-rect content rect)}
+              selection
+              (reduce-kv
+               (fn [selection type identities]
+                 (assoc selection type
+                        (update-area-set (get initial-selection type #{})
+                                         identities
+                                         remove?)))
+               helpers/empty-selection
+               in-rect)]
+          (cond-> state
+            (some? id)
+            (assoc-in [:workspace-local :edit-path id :selection] selection)))))))
 
 (defn deselect-all []
   (ptk/reify ::deselect-all
@@ -118,10 +160,11 @@
               stopper (mse/drag-stopper stream)
               from-p  @ms/mouse-position
 
-              initial-set
+              initial-selection
               (if (or append? remove?)
-                (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
-                #{})
+                (dm/get-in state [:workspace-local :edit-path id :selection]
+                           helpers/empty-selection)
+                helpers/empty-selection)
 
               selrect-stream
               (->> ms/mouse-position
@@ -136,12 +179,13 @@
            (rx/merge
             (->> selrect-stream
                  (rx/map update-area-selection))
-            ;; Throttle node hit-testing to one animation frame so the
-            ;; highlighted nodes track the selection box without recomputing
-            ;; on every pointer move.
+            ;; Throttle path-element hit-testing to one animation frame so the
+            ;; highlighted selection tracks the box without recomputing on
+            ;; every pointer move.
             (->> selrect-stream
                  (rx/buffer-time 16)
                  (rx/map last)
+                 (rx/filter some?)
                  (rx/pipe (rxo/distinct-contiguous))
-                 (rx/map #(select-node-area initial-set remove?))))
+                 (rx/map #(select-path-area % initial-selection remove?))))
            (rx/of (clear-area-selection))))))))

@@ -94,10 +94,13 @@ in `process-path-tool`). The editor renders each node from its index (no more
 `path-actions/check-enabled` stay position-based and convert indices→positions at their
 boundary via `helpers/node-positions`, so the pre-existing duplicate-coordinate collapse
 persists *only* inside those position-based common fns (acceptable; a later pass can make
-the common tool fns index-based). `:selected-segments`/`:selected-handlers` state +
-unified helpers are scaffolded for features 1–3 but their drag-select interaction is not
-wired yet. Remaining wart: `create-node-at-position` still smuggles split params in point
-*metadata* (FIXME in `editor.cljs` `on-pointer-down`).
+the common tool fns index-based). Segments and handlers now use the same unified
+selection/hover model: segment identity is the drawing command index and handler
+identity is `[command-index prefix]`. Click/Shift+click, marquee selection, selected
+rendering, and grouped handler movement are wired for features 1, 3, and 8. Remaining
+wart: `create-node-at-position` still exists with split params in point metadata, but
+the editor no longer renders the insertion preview or invokes it; segment clicks go to
+segment selection.
 
 ## 3. Event transport & ordering model (the heart of it)
 
@@ -326,27 +329,24 @@ Work planned on top of the polished editor, with required groundwork:
   exactly one `update-shapes` for changed content. An unchanged simple shape keeps its
   original type. Empty content is removed only at finalization. Classic and WASM
   viewports render the drawing copy and hide the stored original during edition.
-- [ ] **Feature 1 — make segments selectable.** Today selection state is only `:selected-points`
-   (positions); segments have *no identity* in state — `path-actions/check-enabled`
-   derives them transiently from selected points via
-   `path.segm/get-segments-with-points`. Needs: a `:selected-segments` representation,
-   segment hit-testing (`path/closest-point` exists for hover; need point→segment-index
-   resolution), and rendering of selected segments in `path-editor*`. **Blocked-ish by
-   position-based identity**: segments are naturally `[from-idx to-idx]` index pairs,
-   which go stale under position-keyed remapping. Strongest argument for the
-   index-based-identity groundwork (§2).
+- [x] **Feature 1 — make segments selectable.** Completed 2026-07-10. Segments use
+   their drawing-command index as identity. `path-segment*` renders per-segment hit
+   targets plus hover/selected styling, including synthesized closing lines for
+   `close-path`; selected segments render pink (`#F49EF7`). Plain segment clicks replace
+   selection and Shift+click toggles. Dragging a selected segment moves the unique
+   endpoint nodes of every selected segment, including their anchored Bézier handlers.
+   The insertion preview is disabled for now, so clicking a segment selects it instead
+   of creating a node.
 - [ ] **Feature 2 — copy/paste of nodes and segments.** Needs a serializable selection (again indices,
    not positions-with-metadata) and common-layer functions to extract a sub-content
    (subset of segments/nodes → valid new `PathData` with move-to normalization) and to
    splice content in. Clipboard plumbing follows the existing workspace copy/paste
    flows. Groundwork: stable identity + `common.types.path` extract/splice API.
-- [ ] **Feature 3 — drag selection of segments, nodes and handlers.** Extends
-   `selection/handle-area-selection` + `select-node-area`, which today only collect
-   *points*. Handlers already have `[index prefix]` identity (hover uses it) — reuse it
-   for selection. Segments need rect↔segment intersection in common geometry. Also the
-   place to fix the `buffer-time 100` selection lag (bug 9) and unify the selection
-   state shape (points + segments + handlers) *before* building three variants on the
-   current point-only set.
+- [x] **Feature 3 — drag selection of segments, nodes and handlers.** Completed
+   2026-07-10. The marquee computes all three identity sets once per animation frame.
+   Nodes and visible handler control points use rect containment; lines and approximated
+   Bézier segments use rect intersection. Replace, append, and remove selection modes
+   operate on the complete grouped selection map.
 - [ ] **Feature 4 — round corners in a path.** Fits the existing `process-path-tool` pipeline
    (like make-corner/make-curve); main work is a corner-fillet geometry fn in
    `common.types.path`. If a per-node radius becomes a persistent, editable property
@@ -365,14 +365,17 @@ Work planned on top of the polished editor, with required groundwork:
    surviving segment approximates the removed geometry (fit a cubic through the old
    points instead of straight-joining). Pure common-layer geometry; shares the
    bezier-fitting utility with feature 6. Test-first friendly (pure functions).
+- [x] **Feature 8 — multi-select and move path handlers.** Completed 2026-07-10.
+   Plain click replaces handler selection; Shift+click toggles it; selected handles are
+   filled. Dragging any selected handler translates the full selected set using the
+   snapped primary delta. Existing opposite-handler angle matching is preserved for
+   unselected opposites and suppressed between two selected opposites so neither can
+   overwrite the other's movement.
 
-**Groundwork conclusions:** features 1–3 (and partially 4) all converge on the same
-prerequisite — replace position-based node identity with stable index-based identity
-and a unified selection model (`{:nodes #{idx} :segments #{[i j]} :handlers #{[i prefix]}}`
-or similar), plus the position→index remapping done once at commit time. With the
-event-cleanup fixes complete, this is the next structural prerequisite before features
-1–3. Features 5–7 are mostly common-layer geometry and can proceed in parallel. A
-shared bezier-fitting utility in `common.types.path` serves both 6 and 7.
+**Groundwork conclusions:** the stable index identity and unified selection prerequisite
+for features 1–3 and 8 is complete. Feature 4 can reuse the same node identity. Features
+5–7 are mostly common-layer geometry and can proceed in parallel; a shared
+bezier-fitting utility in `common.types.path` serves both 6 and 7.
 
 ## 7. Testing status
 
@@ -455,6 +458,20 @@ reloads):
 - `pnpm run lint:clj` clean; `cljfmt` clean after fixing pre-existing
   `runner.cljs` formatting.
 
+Validation for segment/handler selection and grouped movement on 2026-07-10:
+
+- Focused namespace: 20 tests, 51 assertions, 0 failures. New coverage verifies
+  cross-type plain/Shift selection, marquee hit-testing for nodes/segments/handlers,
+  and translating two selected opposite handlers without derived opposite deltas
+  cancelling either move. Empty `buffer-time` marquee emissions are filtered and the
+  update event safely ignores a non-rect value (regression for click-outside assertion).
+  Segment movement coverage verifies endpoint identity deduplication and translation of
+  both endpoints plus their anchored/shared handlers.
+- Main CLJS compiler output: `:ok`; all touched CLJS delimiters balanced.
+- `pnpm run lint:clj`: 0 errors, 0 warnings; `pnpm run check-fmt:clj`: clean.
+- Real pointer gestures were not re-run in this pass; the remaining manual checklist in
+  §8 still applies.
+
 ## 8. Suggested plan
 
 Ordered to serve the roadmap in §6:
@@ -477,16 +494,16 @@ Ordered to serve the roadmap in §6:
 - [ ] **Unify edition stop signals and make deferred ordering explicit.** Replace the
   esc-pressed/`:interrupt`/clear-edition-mode/finish-path split and document or replace
   the load-bearing `observe-on :async` / `delay 0` boundaries.
-- [~] **Introduce stable node/segment/handler identity and a unified selection model.**
+- [x] **Introduce stable node/segment/handler identity and a unified selection model.**
   Done for **nodes** (2026-07-10): selection/hover are content-command-index based,
   rendering iterates by index, moves keep indices (no remap), structural tools remap once
   via `helpers/remap-selected-nodes`; `:selected-segments`/`:selected-handlers` +
   `helpers/{node-indices,node-position,node-positions,nodes-in-rect,remap-selected-nodes}`
-  are scaffolded. Live-verified: click/shift/rubber-band select, node drag (index stable),
-  make-curve (selection kept), remove-node (selection remapped), arrow move. **Remaining**
-  for features 1–3: wire segment + handler *selection interaction* (click/drag-select),
-  segment hit-testing/rendering, and optionally push indices into the common tool fns to
-  drop the boundary conversion.
+  were extended with segment/handler click, Shift+click, marquee selection, rendering,
+  and grouped handler movement. Live-verified groundwork: node click/shift/rubber-band,
+  node drag (index stable), make-curve (selection kept), remove-node (selection remapped),
+  and arrow move. Store tests cover the new cross-type selection and handler movement.
+  Pushing indices into the common tool fns remains an optional follow-up.
 - [ ] **Implement roadmap features.** Geometry-heavy features can proceed alongside
   structural work; share one bezier-fitting utility between smoothing and
   remove-with-approximation.
@@ -521,7 +538,7 @@ Ordered to serve the roadmap in §6:
 
 ## 10. Stable node identity refactor (completed 2026-07-10, commit `6f03049135`)
 
-Groundwork for roadmap features 1–3. Replaces position-based node identity with stable
+Groundwork for roadmap features 1–3 and 8. Replaces position-based node identity with stable
 content-command indices and scaffolds a unified node/segment/handler selection model.
 Scope decisions (confirmed with the user): **nodes end-to-end + scaffold** segments/
 handlers (their drag-select interaction is deferred to feature 3), and the common-layer
@@ -582,6 +599,23 @@ rubber-band area-select, node drag (index stable across the move, no remap), `ma
 (selection kept), `remove-node` (selection remapped, removed node dropped), arrow move.
 Focused unit suite 14/14; `cljfmt` clean; `clj-kondo` 0/0; build `:ok`.
 
-### Remaining for features 1–3
-Wire the segment + handler **selection interaction** (click and drag-select), segment
-hit-testing + rendering in `path-editor*`, and optionally index-based common tool fns.
+### Subsequent implementation for features 1, 3, and 8 (2026-07-10)
+Segment + handler click/Shift+click/marquee selection, grouped handler movement, and
+segment hit-testing/rendering are now implemented. The optional follow-up is to push
+indices into the remaining position-based common tool functions.
+
+## 11. Segment and handler selection implementation (2026-07-10, uncommitted)
+
+- `helpers.cljs`: `segment-entries`, endpoint-node identities, polyline rect intersection
+  for line/curve/closing segments, and visible-handler entries/containment.
+- `selection.cljs`: generic cross-type plain/Shift selection; segment hover; one
+  `select-path-area` event that updates all three sets from the same marquee rect.
+- `edition.cljs`: click-vs-drag discrimination for segments and handlers. Segment drags
+  reuse the node-modifier pipeline for all unique endpoints; handler groups move from a
+  single snapped primary delta. Selected opposite handlers do not receive each other's
+  derived angle-preservation modifier.
+- `editor.cljs`: per-segment hit targets and selected/hover rendering; selected handler
+  rendering; selected segments are pink; Shift is passed into segment/handler dragging.
+  The insertion preview is not rendered; click-to-insert-node is temporarily disabled.
+- `path_edition_test.cljs`: state-level selection, marquee, grouped-handler movement,
+  and segment movement coverage. Focused suite result: 20 tests / 51 assertions.

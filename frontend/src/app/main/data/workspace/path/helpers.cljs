@@ -8,7 +8,9 @@
   (:require
    [app.common.data :as d]
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.geom.shapes :as gsh]
+   [app.common.geom.shapes.intersect :as gsi]
    [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]))
@@ -136,6 +138,107 @@
               (filter (fn [[_ seg]] (gsh/has-point-rect? rect (path.helpers/segment->point seg))))
               (map first))
         (d/enumerate content)))
+
+(defn segment-entries
+  "Selectable path segments with their command index and endpoints. The
+  command index is the segment identity; move-to commands do not produce a
+  segment, while close-path commands represent the closing straight line."
+  [content]
+  (loop [index               0
+         pending             (seq content)
+         previous            nil
+         previous-index      nil
+         subpath-start       nil
+         subpath-start-index nil
+         result              []]
+    (if-let [{:keys [command] :as segment} (first pending)]
+      (let [close-path?         (= command :close-path)
+            move-to?            (= command :move-to)
+            point               (if close-path?
+                                  subpath-start
+                                  (path.helpers/segment->point segment))
+            point-index         (if close-path? subpath-start-index index)
+            result              (cond-> result
+                                  (and previous point (not move-to?))
+                                  (conj {:index index
+                                         :from previous
+                                         :from-index previous-index
+                                         :to point
+                                         :to-index point-index
+                                         :segment segment}))
+            subpath-start       (if move-to? point subpath-start)
+            subpath-start-index (if move-to? index subpath-start-index)]
+        (recur (inc index)
+               (next pending)
+               point
+               point-index
+               subpath-start
+               subpath-start-index
+               result))
+      result)))
+
+(defn segment-node-indices
+  "Unique endpoint-node indices for the selected segment command indices."
+  [content segment-indices]
+  (let [segment-indices (set segment-indices)]
+    (into #{}
+          (comp (filter #(contains? segment-indices (:index %)))
+                (mapcat (juxt :from-index :to-index))
+                (remove nil?))
+          (segment-entries content))))
+
+(defn- segment-lines
+  [{:keys [from to segment]}]
+  (if (= :curve-to (:command segment))
+    (path.helpers/curve->lines from
+                               to
+                               (path/get-handler segment :c1)
+                               (path/get-handler segment :c2))
+    [[from to]]))
+
+(defn segments-in-rect
+  "Command indices of path segments that cross or fall inside `rect`. Curves
+  use the same polyline approximation as the common path hit-testing code."
+  [content rect]
+  (let [rect-lines (gsi/points->lines (grc/rect->points rect))]
+    (into #{}
+          (comp
+           (filter
+            (fn [entry]
+              (let [lines (segment-lines entry)]
+                (or (some (fn [[from to]]
+                            (or (grc/contains-point? rect from)
+                                (grc/contains-point? rect to)))
+                          lines)
+                    (gsi/intersects-lines? rect-lines lines)))))
+           (map :index))
+          (segment-entries content))))
+
+(defn handler-entries
+  "Visible path handlers as `{:identity [index prefix] :point p}` entries."
+  [content]
+  (into []
+        (comp
+         (mapcat
+          (fn [[index segment]]
+            (when (= :curve-to (:command segment))
+              (keep
+               (fn [prefix]
+                 (let [handler (path/get-handler-point content index prefix)
+                       node    (path/handler->node content index prefix)]
+                   (when (and handler (not= handler node))
+                     {:identity [index prefix]
+                      :point handler})))
+               [:c1 :c2])))))
+        (d/enumerate content)))
+
+(defn handlers-in-rect
+  "Identities of visible path handlers whose control point is inside `rect`."
+  [content rect]
+  (into #{}
+        (comp (filter #(grc/contains-point? rect (:point %)))
+              (map :identity))
+        (handler-entries content)))
 
 (defn remap-selected-nodes
   "Re-resolve selected node indices against `new-content` after a structural

@@ -23,6 +23,7 @@
 ;; Edition
 (dm/export edition/start-move-handler)
 (dm/export edition/start-move-path-point)
+(dm/export edition/start-move-path-segment)
 (dm/export edition/start-path-edit)
 (dm/export edition/create-node-at-position)
 (dm/export edition/move-selected)
@@ -30,8 +31,12 @@
 ;; Selection
 (dm/export selection/handle-area-selection)
 (dm/export selection/select-node)
+(dm/export selection/select-segment)
+(dm/export selection/select-handler)
 (dm/export selection/path-handler-enter)
 (dm/export selection/path-handler-leave)
+(dm/export selection/path-segment-enter)
+(dm/export selection/path-segment-leave)
 (dm/export selection/path-pointer-enter)
 (dm/export selection/path-pointer-leave)
 

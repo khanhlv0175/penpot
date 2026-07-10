@@ -7,6 +7,7 @@
 (ns frontend-tests.logic.path-edition-test
   (:require
    [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.shapes :as cths]
@@ -16,6 +17,8 @@
    [app.main.data.workspace.path.common :as path.common]
    [app.main.data.workspace.path.drawing :as path.drawing]
    [app.main.data.workspace.path.edition :as path.edition]
+   [app.main.data.workspace.path.helpers :as path.helpers]
+   [app.main.data.workspace.path.selection :as path.selection]
    [app.main.data.workspace.path.shortcuts :as path.shortcuts]
    [app.main.data.workspace.path.state :as path.state]
    [app.main.data.workspace.path.streams :as path.streams]
@@ -132,6 +135,128 @@
         shape (-> (cths/get-shape file :rect1)
                   (path/convert-to-path))]
     {:workspace-drawing {:object shape}}))
+
+(defn- selectable-path-content
+  []
+  (path/content
+   [{:command :move-to
+     :params {:x 0 :y 0}}
+    {:command :curve-to
+     :params {:c1x 2 :c1y 0
+              :c2x 8 :c2y 0
+              :x 10 :y 0}}
+    {:command :curve-to
+     :params {:c1x 12 :c1y 0
+              :c2x 18 :c2y 0
+              :x 20 :y 0}}]))
+
+(defn- selectable-path-state
+  [id content selection]
+  {:workspace-local {:edition id
+                     :edit-path {id {:selection selection}}}
+   :workspace-drawing {:object {:id id
+                                :type :path
+                                :content content}}})
+
+(t/deftest plain-and-shift-selection-work-across-path-element-types
+  (let [id      (random-uuid)
+        content (selectable-path-content)
+        state   (selectable-path-state
+                 id content
+                 {:nodes #{0}
+                  :segments #{1}
+                  :handlers #{[1 :c1]}})
+        state'  (ptk/update (path.selection/select-handler 1 :c2 false) state)
+        state'' (ptk/update (path.selection/select-segment 2 true) state')
+        state''' (ptk/update (path.selection/select-handler 1 :c2 true) state'')
+        state'''' (ptk/update (path.selection/select-handler 2 :c1 true) state''')]
+    (t/is (= {:nodes #{}
+              :segments #{}
+              :handlers #{[1 :c2]}}
+             (get-in state' [:workspace-local :edit-path id :selection])))
+    (t/is (= {:nodes #{}
+              :segments #{2}
+              :handlers #{[1 :c2]}}
+             (get-in state'' [:workspace-local :edit-path id :selection])))
+    (t/is (= {:nodes #{}
+              :segments #{2}
+              :handlers #{[2 :c1]}}
+             (get-in state'''' [:workspace-local :edit-path id :selection])))))
+
+(t/deftest path-area-selection-includes-segments-nodes-and-handlers
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        selection path.helpers/empty-selection
+        state     (selectable-path-state id content selection)
+        rect      (grc/make-rect 1 -2 3 4)
+        state'    (ptk/update (path.selection/select-path-area
+                               rect selection false)
+                              state)
+        node-rect (grc/make-rect -1 -1 1.5 2)
+        state''   (ptk/update (path.selection/select-path-area
+                               node-rect selection false)
+                              state)]
+    (t/is (= {:nodes #{}
+              :segments #{1}
+              :handlers #{[1 :c1]}}
+             (get-in state' [:workspace-local :edit-path id :selection])))
+    (t/is (= {:nodes #{0}
+              :segments #{1}
+              :handlers #{}}
+             (get-in state'' [:workspace-local :edit-path id :selection])))))
+
+(t/deftest path-area-selection-ignores-empty-buffer-emissions
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        selection path.helpers/empty-selection
+        state     (selectable-path-state id content selection)]
+    (t/is (= state
+             (ptk/update (path.selection/select-path-area
+                          nil selection false)
+                         state)))))
+
+(t/deftest selected-segments-resolve-to-unique-endpoint-nodes
+  (let [content (selectable-path-content)]
+    (t/is (= #{0 1}
+             (path.helpers/segment-node-indices content #{1})))
+    (t/is (= #{0 1 2}
+             (path.helpers/segment-node-indices content #{1 2})))))
+
+(t/deftest moving-selected-segments-translates-endpoints-and-handlers
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        selection {:nodes #{}
+                   :segments #{1}
+                   :handlers #{}}
+        state     (selectable-path-state id content selection)
+        event     (path.edition/move-selected-path-segment
+                   (gpt/point 5 0)
+                   (gpt/point 8 4))
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= (gpt/point 3 4) (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 13 4) (path.helpers/node-position content' 1)))
+    (t/is (= (gpt/point 5 4) (path/get-handler-point content' 1 :c1)))
+    (t/is (= (gpt/point 11 4) (path/get-handler-point content' 1 :c2)))
+    (t/is (= (gpt/point 15 4) (path/get-handler-point content' 2 :c1)))))
+
+(t/deftest moving-selected-opposite-handlers-translates-both
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        selection {:nodes #{}
+                   :segments #{}
+                   :handlers #{[1 :c2] [2 :c1]}}
+        state     (selectable-path-state id content selection)
+        event     (path.edition/modify-selected-handlers
+                   id [1 :c2] {} 3 4 true)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= {:c2x 3 :c2y 4} (get modifiers 1)))
+    (t/is (= {:c1x 3 :c1y 4} (get modifiers 2)))
+    (t/is (= (gpt/point 11 4) (path/get-handler-point content' 1 :c2)))
+    (t/is (= (gpt/point 15 4) (path/get-handler-point content' 2 :c1)))))
 
 (defn- run-handle-drawing-end
   "Drives the handle-drawing continuation with an ::end-edition carrying

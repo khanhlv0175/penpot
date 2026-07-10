@@ -24,20 +24,64 @@
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
-(defn modify-handler [id index prefix dx dy match-opposite?]
-  (ptk/reify ::modify-handler
+(defn- handler-modifier-delta
+  [modifiers index prefix]
+  (let [[cx cy] (path.helpers/prefix->coords prefix)]
+    (gpt/point (dm/get-in modifiers [index cx] 0)
+               (dm/get-in modifiers [index cy] 0))))
+
+(defn- remove-handler-modifier
+  [modifiers [index prefix]]
+  (let [[cx cy]  (path.helpers/prefix->coords prefix)
+        modifiers (update modifiers index dissoc cx cy)]
+    (cond-> modifiers
+      (empty? (get modifiers index)) (dissoc index))))
+
+(defn modify-selected-handlers
+  [id primary start-modifiers dx dy match-opposite?]
+  (ptk/reify ::modify-selected-handlers
     ptk/UpdateEvent
     (update [_ state]
-
-      (let [content (st/get-path state :content)
-            modifiers (helpers/move-handler-modifiers content index prefix false match-opposite? dx dy)
-            [cx cy] (if (= prefix :c1) [:c1x :c1y] [:c2x :c2y])
-            point (gpt/point (+ (dm/get-in content [index :params cx]) dx)
-                             (+ (dm/get-in content [index :params cy]) dy))]
-
+      (let [content           (st/get-path state :content)
+            selected-handlers (dm/get-in state
+                                         [:workspace-local :edit-path id :selection :handlers]
+                                         #{})
+            selected-handlers (cond-> selected-handlers
+                                (empty? selected-handlers) (conj primary))
+            move-delta        (gpt/point dx dy)
+            moved-modifiers
+            (reduce
+             (fn [modifiers [index prefix :as handler-id]]
+               (let [start-delta    (handler-modifier-delta start-modifiers index prefix)
+                     delta          (gpt/add start-delta move-delta)
+                     opposite-id    (path/opposite-index content index prefix)
+                     opposite-selected? (contains? selected-handlers opposite-id)
+                     match-opposite? (and match-opposite? (not opposite-selected?))
+                     handler-modifiers
+                     (cond-> (helpers/move-handler-modifiers content
+                                                             index
+                                                             prefix
+                                                             false
+                                                             match-opposite?
+                                                             (:x delta)
+                                                             (:y delta))
+                       opposite-selected?
+                       (remove-handler-modifier opposite-id))]
+                 (d/deep-merge modifiers handler-modifiers)))
+             {}
+             selected-handlers)
+            modifiers         (d/deep-merge start-modifiers moved-modifiers)
+            [primary-index primary-prefix] primary
+            primary-handler   (path/get-handler-point content primary-index primary-prefix)
+            primary-delta     (gpt/add
+                               (handler-modifier-delta start-modifiers
+                                                       primary-index
+                                                       primary-prefix)
+                               move-delta)
+            moving-handler    (gpt/add primary-handler primary-delta)]
         (-> state
-            (update-in [:workspace-local :edit-path id :content-modifiers] merge modifiers)
-            (assoc-in [:workspace-local :edit-path id :moving-handler] point))))))
+            (assoc-in [:workspace-local :edit-path id :content-modifiers] modifiers)
+            (assoc-in [:workspace-local :edit-path id :moving-handler] moving-handler))))))
 
 (defn- apply-content-modifiers*
   [id new-content]
@@ -114,29 +158,42 @@
         (-> state
             (assoc-in [:workspace-local :edit-path id :content-modifiers] content-modifiers))))))
 
+(defn- move-node-indices
+  [state node-indices from-point to-point]
+  (let [id        (st/get-path-id state)
+        content   (st/get-path state :content)
+        to-point  (cond-> to-point
+                    (:shift? to-point) (path.helpers/position-fixed-angle from-point))
+        delta     (gpt/subtract to-point from-point)
+        points    (helpers/node-positions content node-indices)
+        reducer   (partial modify-content-point content delta)
+        modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
+        modifiers (reduce reducer modifiers points)]
+    (-> state
+        (assoc-in [:workspace-local :edit-path id :moving-nodes] true)
+        (assoc-in [:workspace-local :edit-path id :content-modifiers] modifiers))))
+
 (defn move-selected-path-point [from-point to-point]
   (ptk/reify ::move-point
     ptk/UpdateEvent
     (update [_ state]
-      (let [id (st/get-path-id state)
-            content (st/get-path state :content)
-            to-point (cond-> to-point
-                       (:shift? to-point) (path.helpers/position-fixed-angle from-point))
+      (let [id             (st/get-path-id state)
+            selected-nodes (dm/get-in state
+                                      [:workspace-local :edit-path id :selection :nodes]
+                                      #{})]
+        (move-node-indices state selected-nodes from-point to-point)))))
 
-            delta (gpt/subtract to-point from-point)
-
-            modifiers-reducer (partial modify-content-point content delta)
-
-            selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
-            points (helpers/node-positions content selected-nodes)
-
-            modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
-            modifiers (->> points
-                           (reduce modifiers-reducer modifiers))]
-
-        (-> state
-            (assoc-in [:workspace-local :edit-path id :moving-nodes] true)
-            (assoc-in [:workspace-local :edit-path id :content-modifiers] modifiers))))))
+(defn move-selected-path-segment [from-point to-point]
+  (ptk/reify ::move-segment
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id                (st/get-path-id state)
+            content           (st/get-path state :content)
+            selected-segments (dm/get-in state
+                                         [:workspace-local :edit-path id :selection :segments]
+                                         #{})
+            node-indices      (helpers/segment-node-indices content selected-segments)]
+        (move-node-indices state node-indices from-point to-point)))))
 
 (declare drag-selected-points)
 
@@ -179,6 +236,47 @@
               (rx/map #(move-selected-path-point start-position %))
               (rx/take-until stopper))
          (rx/of (apply-content-modifiers)))))))
+
+(declare drag-selected-segments)
+
+(defn start-move-path-segment
+  [index shift?]
+  (ptk/reify ::start-move-path-segment
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id                (dm/get-in state [:workspace-local :edition])
+            selected-segments (dm/get-in state
+                                         [:workspace-local :edit-path id :selection :segments]
+                                         #{})
+            selected?         (contains? selected-segments index)]
+        (streams/drag-stream
+         (rx/of
+          (when-not selected? (selection/select-segment index shift?))
+          (drag-selected-segments @ms/mouse-position))
+         (rx/of (selection/select-segment index shift?)))))))
+
+(defn drag-selected-segments
+  [start-position]
+  (ptk/reify ::drag-selected-segments
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [stopper           (mse/drag-stopper stream)
+            id                (dm/get-in state [:workspace-local :edition])
+            content           (st/get-path state :content)
+            selected-segments (dm/get-in state
+                                         [:workspace-local :edit-path id :selection :segments]
+                                         #{})
+            node-indices      (helpers/segment-node-indices content selected-segments)
+            selected-points   (helpers/node-positions content node-indices)
+            points            (path/get-points content)]
+        (if (empty? selected-points)
+          (rx/empty)
+          (rx/concat
+           (->> points
+                (streams/move-points-stream start-position selected-points)
+                (rx/map #(move-selected-path-segment start-position %))
+                (rx/take-until stopper))
+           (rx/of (apply-content-modifiers))))))))
 
 (defn- get-displacement
   "Retrieve the correct displacement delta point for the
@@ -250,49 +348,68 @@
                       (finish-move-selected))))
             (rx/empty)))))))
 
+(declare drag-selected-handlers)
+
 (defn start-move-handler
-  [index prefix]
-  (ptk/reify ::start-move-handler
+  ([index prefix]
+   (start-move-handler index prefix false))
+  ([index prefix shift?]
+   (ptk/reify ::start-move-handler
+     ptk/WatchEvent
+     (watch [_ state _]
+       (let [id                (dm/get-in state [:workspace-local :edition])
+             handler-id        [index prefix]
+             selected-handlers (dm/get-in state
+                                          [:workspace-local :edit-path id :selection :handlers]
+                                          #{})
+             selected?         (contains? selected-handlers handler-id)]
+         (streams/drag-stream
+          (rx/of
+           (when-not selected?
+             (selection/select-handler index prefix shift?))
+           (drag-selected-handlers handler-id))
+          (rx/of (selection/select-handler index prefix shift?))))))))
+
+(defn drag-selected-handlers
+  [[index prefix :as primary]]
+  (ptk/reify ::drag-selected-handlers
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [id (dm/get-in state [:workspace-local :edition])
-            cx (d/prefix-keyword prefix :x)
-            cy (d/prefix-keyword prefix :y)
-
-            modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers])
-            start-delta-x (dm/get-in modifiers [index cx] 0)
-            start-delta-y (dm/get-in modifiers [index cy] 0)
-
-            content (st/get-path state :content)
-            points  (path/get-points content)
-
-            point (-> content (nth (if (= prefix :c1) (dec index) index)) (path.helpers/segment->point))
-            handler (-> content (nth index) (path/get-handler prefix))
-
+      (let [id              (dm/get-in state [:workspace-local :edition])
+            content         (st/get-path state :content)
+            points          (path/get-points content)
+            start-modifiers (dm/get-in state
+                                       [:workspace-local :edit-path id :content-modifiers]
+                                       {})
+            start-delta     (handler-modifier-delta start-modifiers index prefix)
+            point           (path/handler->node content index prefix)
+            handler         (-> (path/get-handler-point content index prefix)
+                                (gpt/add start-delta))
             [op-idx op-prefix] (path/opposite-index content index prefix)
-            opposite (path/get-handler-point content op-idx op-prefix)]
-
-        (streams/drag-stream
-         (rx/concat
-          (->> (streams/move-handler-stream handler point handler opposite points)
-               (rx/map
-                (fn [{:keys [x y alt? shift?]}]
-                  (let [pos (cond-> (gpt/point x y)
-                              shift? (path.helpers/position-fixed-angle point))]
-                    (modify-handler
-                     id
-                     index
-                     prefix
-                     (+ start-delta-x (- (:x pos) (:x handler)))
-                     (+ start-delta-y (- (:y pos) (:y handler)))
-                     (not alt?)))))
-               (rx/take-until
-                (rx/merge
-                 (mse/drag-stopper stream)
-                 (->> stream
-                      (rx/filter streams/finish-edition?)))))
-
-          (rx/concat (rx/of (apply-content-modifiers)))))))))
+            opposite        (when op-idx
+                              (-> (path/get-handler-point content op-idx op-prefix)
+                                  (gpt/add (handler-modifier-delta start-modifiers
+                                                                   op-idx
+                                                                   op-prefix))))
+            stopper         (rx/merge
+                             (mse/drag-stopper stream)
+                             (->> stream
+                                  (rx/filter streams/finish-edition?)))]
+        (rx/concat
+         (->> (streams/move-handler-stream handler point handler opposite points)
+              (rx/map
+               (fn [{:keys [x y alt? shift?]}]
+                 (let [position (cond-> (gpt/point x y)
+                                  shift? (path.helpers/position-fixed-angle point))
+                       delta    (gpt/subtract position handler)]
+                   (modify-selected-handlers id
+                                             primary
+                                             start-modifiers
+                                             (:x delta)
+                                             (:y delta)
+                                             (not alt?)))))
+              (rx/take-until stopper))
+         (rx/of (apply-content-modifiers)))))))
 
 (declare stop-path-edit)
 
