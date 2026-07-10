@@ -6,6 +6,7 @@
 
 (ns app.main.data.workspace.shortcuts.customize
   (:require
+   [app.main.data.event :as ev]
    [app.main.data.profile :as du]
    [app.main.data.shortcuts :as ds]
    [beicon.v2.core :as rx]
@@ -25,7 +26,9 @@
                               (assoc group-map conflicting-key "")
                               group-map)
             new-customs      (assoc current-customs group-key group-map)]
-        (rx/of (du/update-profile-props {:custom-shortcuts new-customs})
+        (rx/of 
+         (ev/event {::ev/name "set-custom-shortcut"})
+         (du/update-profile-props {:custom-shortcuts new-customs})
                (ds/rebind-shortcuts))))))
 
 
@@ -59,13 +62,16 @@
             new-customs      (if (empty? group-map)
                                (dissoc current-customs group-key)
                                (assoc current-customs group-key group-map))]
-        (rx/of (du/update-profile-props {:custom-shortcuts new-customs})
-               (ds/rebind-shortcuts))))))
+        (rx/of
+         (ev/event {::ev/name "reset-custom-shortcut"})
+         (du/update-profile-props {:custom-shortcuts new-customs})
+         (ds/rebind-shortcuts))))))
 
 (defn reset-all-custom-shortcuts
   []
   (ptk/reify ::reset-all-custom-shortcuts
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (du/update-profile-props {:custom-shortcuts {}})
+      (rx/of (ev/event {::ev/name "reset-all-custom-shortcuts"})
+             (du/update-profile-props {:custom-shortcuts {}})
              (ds/rebind-shortcuts)))))
