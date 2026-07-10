@@ -186,10 +186,18 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   non-path edition returns an empty stream and cannot create path state. Live ordering
   validation observed drawing/edit state present and transient preview/last-point
   cleared at `finish-path`, followed by complete cleanup at `stop-path-edit`.
-- [ ] **Bug 4 — undo-entry re-entrancy.** `add-undo-entry` is injected synchronously
-  from the swap that changed drawing content, before that event's watch. Persisting
-  during path-local undo has been removed, and `:old-content` now stays stable, but
-  entries can still capture transient preview/last-point state.
+- [x] **Bug 4 — undo-entry re-entrancy.** Fixed 2026-07-10. `add-undo-entry` is still
+  injected synchronously from the content-changing swap (via `rx/from-atom`
+  `path-content-ref`), before that event's watch, but this is now provably safe: every
+  field an entry captures — content/selrect/points and the `:last-point`/`:prev-handler`
+  draw cursors — is written in the *same swap!* as the content change (`add-node`,
+  `finish-drag`), so the re-entrant capture is consistent. The one genuinely transient,
+  render-only field, `:preview` (the dashed next-segment hint that follows the mouse),
+  was the only thing that could be captured stale — e.g. applying a `process-path-tool`
+  operation while a draw-mode preview was showing, then undoing, restored a phantom
+  segment. `make-entry` no longer stores `:preview`, and `load-entry` clears it to nil on
+  undo/redo (it is recomputed on the next `preview-next-point`). Focused unit suite green
+  (14 tests / 34 assertions).
 - [ ] **Bug 5 — two racing stop signals per Esc.** `esc-pressed` and the `:interrupt`
   it emits arrive at different points; different loops still key on different events.
 - [ ] **Bug 6 — DOM-order race when closing a path.** Node handlers stop propagation;

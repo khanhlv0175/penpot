@@ -27,17 +27,21 @@
   [event]
   (= :app.main.data.workspace.common/redo (ptk/type event)))
 
+;; The undo entry never stores `:preview`: it is a render-only next-segment
+;; hint recomputed on the next pointer move. The remaining fields
+;; (content/selrect/points/last-point/prev-handler) are all set in the same
+;; swap! as the content change, so capturing them from the re-entrant
+;; content watcher is consistent.
 (defn- make-entry [state]
   (let [id (st/get-path-id state)
         shape (st/get-path state)]
     {:content (:content shape)
      :selrect (:selrect shape)
      :points  (:points shape)
-     :preview (get-in state [:workspace-local :edit-path id :preview])
      :last-point (get-in state [:workspace-local :edit-path id :last-point])
      :prev-handler (get-in state [:workspace-local :edit-path id :prev-handler])}))
 
-(defn- load-entry [state {:keys [content selrect points preview last-point prev-handler]}]
+(defn- load-entry [state {:keys [content selrect points last-point prev-handler]}]
   (let [id (st/get-path-id state)]
     (-> state
         (d/assoc-in-when (st/get-path-location state :content) content)
@@ -46,7 +50,7 @@
         (d/update-in-when
          [:workspace-local :edit-path id]
          assoc
-         :preview preview
+         :preview nil
          :last-point last-point
          :prev-handler prev-handler))))
 
