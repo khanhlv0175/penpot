@@ -141,8 +141,11 @@
            (rx/merge
             (->> selrect-stream
                  (rx/map update-area-selection))
+            ;; Throttle node hit-testing to one animation frame so the
+            ;; highlighted nodes track the selection box without recomputing
+            ;; on every pointer move.
             (->> selrect-stream
-                 (rx/buffer-time 100)
+                 (rx/buffer-time 16)
                  (rx/map last)
                  (rx/pipe (rxo/distinct-contiguous))
                  (rx/map #(select-node-area initial-set remove?))))

@@ -377,7 +377,7 @@
                                       (or drawing-obj transform)
                                       (not path-editing?)
                                       (not page-transition?))
-        show-selrect?            (and selrect (empty? drawing) (not text-editing?) (not page-transition?))
+        show-selrect?            (and selrect (or (empty? drawing) path-editing?) (not text-editing?) (not page-transition?))
         show-measures?           (and (not transform)
                                       (not path-editing?)
                                       (or show-distances? mode-inspect? read-only?)

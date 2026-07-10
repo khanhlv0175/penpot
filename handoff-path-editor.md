@@ -201,8 +201,27 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
 - [x] **Bug 8 — `apply-content-modifiers` page-id fallback typo.** The problematic
   commit-building path was removed by the drawing-copy refactor; modifiers now update
   drawing content directly.
-- [ ] **Bug 9 — rubber-band selection lags by up to 100 ms.** Caused by
-  `handle-area-selection` using `buffer-time 100` for node selection.
+- [x] **Bug 9 — rubber-band selection lags by up to 100 ms.** Fixed 2026-07-10.
+  `handle-area-selection` used `buffer-time 100` on the node hit-testing branch, so
+  the highlighted nodes trailed the visible selection box by up to 100 ms during the
+  drag. The visible selrect (`update-area-selection`) already updated live off
+  `ms/mouse-position`; only the selection branch was throttled. The final selection at
+  release was already correct because `buffer-time` (RxJS `bufferTime`) flushes its
+  pending buffer on source completion (the `drag-stopper`). Fix: tighten the throttle
+  to one animation frame (`buffer-time 16`), preserving the same structure — completion
+  flush and `distinct-contiguous` guard — so hit-testing tracks the box in real time
+  without recomputing on every pointer move.
+  **Rubber-band box regression fixed alongside (from the drawing-copy refactor):** the
+  viewport `show-selrect?` gate was `(and selrect (empty? drawing) …)`, but path edition
+  now populates `[:workspace-drawing :object]` with the edit copy, so `(empty? drawing)`
+  was false during node editing and the selection box never rendered. Relaxed to
+  `(or (empty? drawing) path-editing?)` in both `viewport.cljs` and
+  `viewport_wasm.cljs`; `selrect` is only set by the path area-selection while editing,
+  so this doesn't affect normal (non-path) area selection. Live-validated on the WASM
+  viewport: entered node editing (`edit-mode :move`, drawing object present), dragged a
+  rubber band over empty canvas — mid-drag `[:workspace-local :selrect]` set, the
+  `workspace-selection-rect` element rendered, and `:selected-points` reached 2 during
+  the drag; on release the box cleared and the selection was retained.
 - [x] **Bug 10 — exiting a newly drawn path left the edition cursor active.** State
   reproduced on 2026-07-10: `:edition` was nil, but `:edit-path` and
   `:workspace-drawing :object` remained, so viewport cursor logic still considered the

@@ -265,7 +265,7 @@
                                    (cond-> base-objects
                                      path-editing?
                                      (assoc-in [edition :hidden] true)))
-        show-selrect?            (and selrect (empty? drawing) (not text-editing?))
+        show-selrect?            (and selrect (or (empty? drawing) path-editing?) (not text-editing?))
         show-measures?           (and (not transform)
                                       (not path-editing?)
                                       (or show-distances? mode-inspect? read-only?))
