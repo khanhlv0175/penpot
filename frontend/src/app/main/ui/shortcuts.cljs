@@ -604,7 +604,7 @@
              [:div {:class (stl/css :shortcut-actions)
                     :aria-labelledby (dm/str command-translate "-label")}
               (if (and customized? (str/blank? content))
-                [:> tooltip* {:content (tr "shortcuts.disabled")
+                [:> tooltip* {:content (tr "shortcuts.disabled-shortcut")
                               :trigger-ref trigger-ref
                               :id (dm/str command-translate "-tooltip")
                               :class (stl/css :option-text)}
@@ -672,10 +672,11 @@
                          :section-key section-key
                          :conflicts conflicts}]
 
-      [:ul {:class (stl/css :subsection-menu)
-            :hidden hidden
-            :id (dm/str (name section-key) "-section")}
-       (for [[sub-name sub-info] subsections]
+       [:ul {:class (stl/css :subsection-menu)
+             :hidden hidden
+             :id (dm/str (name section-key) "-section")}
+        (let [sorted-subs (sort-by (fn [[_ v]] (:translation v)) subsections)]
+          (for [[sub-name sub-info] sorted-subs]
          (let [visible? (some #(= % (:id sub-info)) open-sections)]
            [:li {:key (name sub-name)}
             [:h4
@@ -692,8 +693,9 @@
                                :editable? editable?
                                :hidden (not visible?)
                                :custom-shortcuts custom-shortcuts
-                               :section-key section-key
-                               :conflicts conflicts}]]))])))
+                                :section-key section-key
+                                :conflicts conflicts}]])))])))
+
 
 
 (mf/defc shortcut-section*

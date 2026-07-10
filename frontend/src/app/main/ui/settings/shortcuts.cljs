@@ -120,10 +120,7 @@
 
         all-shortcuts           (into {} (filter (fn [[_ v]] (section-has-content? v)) all-shortcuts))
         filtered-shortcuts      (filter-shortcuts-tree all-shortcuts shortcut-filter filter-term)
-        search-open-sections    (collect-open-section-ids filtered-shortcuts)
-        effective-open-sections (if (str/blank? filter-term)
-                                  open-sections
-                                  search-open-sections)
+        effective-open-sections open-sections
 
         on-search-term-change
         (mf/use-fn

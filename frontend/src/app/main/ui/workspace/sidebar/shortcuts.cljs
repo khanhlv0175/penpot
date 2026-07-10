@@ -9,6 +9,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.config :as cf]
    [app.main.data.dashboard.shortcuts]
    [app.main.data.shortcuts :as ds]
    [app.main.data.viewer.shortcuts]
@@ -147,10 +148,11 @@
                                       :editable? false
                                       :custom-shortcuts custom-shortcuts}]))]
        [:div {:class (stl/css :not-found)} (tr "shortcuts.not-found")])
-     [:> bl/button-link* {:on-click go-to-edit-shortcuts
+     (when (contains? cf/flags :custom-shortcuts)
+      [:> bl/button-link* {:on-click go-to-edit-shortcuts
                           :label (tr "shortcuts.edit-on-settings")
                           :class (stl/css :edit-shortcuts-button)
                           :icon (mf/html
                                  [:> icon* {:icon-id i/open-link
                                             :size "m"
-                                            :aria-hidden true}])}]]))
+                                            :aria-hidden true}])}])]))

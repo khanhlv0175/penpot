@@ -46,6 +46,7 @@
   padding: var(--sp-m);
   overflow-y: auto;
   color: var(--color-foreground-secondary);
+  min-block-size: px2rem(250);
 }
 
 .not-found {

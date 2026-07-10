@@ -16,6 +16,18 @@
   padding-block-end: px2rem(32);
 }
 
+.shortcuts-list {
+  @include t.use-typography("body-small");
+
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  padding: var(--sp-m);
+  overflow-y: auto;
+  color: var(--color-foreground-secondary);
+  min-block-size: px2rem(250);
+}
+
 .shortcuts-content {
   display: flex;
   flex-direction: column;
