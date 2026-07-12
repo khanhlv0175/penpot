@@ -85,6 +85,24 @@
 (defn separate-nodes []
   (process-path-tool path/separate-nodes))
 
+(defn flip-nodes
+  "Flips the selected nodes (or the whole path when nothing is selected)
+  across the center of their bounding box. `axis` is `:horizontal` or
+  `:vertical`. Node indices are preserved, so the selection stays valid."
+  [axis]
+  (ptk/reify ::flip-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id       (st/get-path-id state)
+            content  (st/get-path state :content)
+            selected (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+            indices  (if (seq selected)
+                       selected
+                       (helpers/node-indices content))
+            content  (path/flip-content content indices axis)]
+        (-> (st/set-content state content)
+            (update-in (st/get-path-location state) path/update-geometry))))))
+
 (defn toggle-snap []
   (ptk/reify ::toggle-snap
     ptk/UpdateEvent

@@ -327,6 +327,54 @@
 
     (reduce process-segment content with-prev)))
 
+(defn flip-content
+  "Reflects the given node `indices` and their handles across the center of
+  the selected nodes' bounding box. `axis` is `:horizontal` (mirror on the
+  vertical axis, reflecting x) or `:vertical` (reflecting y). A handle is
+  reflected when its owning node is selected: `c1` of command i belongs to
+  node i-1, `c2` to node i. Indices are unchanged, so a selection over the
+  result stays valid."
+  [content indices axis]
+  (let [content   (vec content)
+        indices   (set indices)
+        node-sel? (fn [i] (contains? indices i))
+
+        positions (into []
+                        (comp (filter (fn [[i seg]]
+                                        (and (node-sel? i)
+                                             (not= :close-path (:command seg)))))
+                              (map (fn [[_ seg]] (helpers/segment->point seg))))
+                        (d/enumerate content))]
+    (if (empty? positions)
+      (impl/from-plain content)
+      (let [xs         (map :x positions)
+            ys         (map :y positions)
+            cx         (/ (+ (reduce min xs) (reduce max xs)) 2.0)
+            cy         (/ (+ (reduce min ys) (reduce max ys)) 2.0)
+            flip-x?    (= axis :horizontal)
+
+            reflect    (fn [params xk yk]
+                         (if flip-x?
+                           (cond-> params
+                             (contains? params xk) (update xk #(- (* 2.0 cx) %)))
+                           (cond-> params
+                             (contains? params yk) (update yk #(- (* 2.0 cy) %)))))
+
+            flip-cmd   (fn [i {:keys [command params] :as seg}]
+                         (let [curve? (= :curve-to command)
+                               params (cond-> params
+                                        (and (not= :close-path command) (node-sel? i))
+                                        (reflect :x :y)
+
+                                        (and curve? (node-sel? (dec i)))
+                                        (reflect :c1x :c1y)
+
+                                        (and curve? (node-sel? i))
+                                        (reflect :c2x :c2y))]
+                           (assoc seg :params params)))]
+        (impl/from-plain
+         (into [] (map-indexed flip-cmd) content))))))
+
 (defn make-corner-point
   "Changes the content to make a point a 'corner'"
   [content point]

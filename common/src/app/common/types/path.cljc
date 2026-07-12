@@ -389,6 +389,13 @@
   (let [content (impl/path-data content)]
     (segment/separate-nodes content points)))
 
+(defn flip-content
+  "Reflects the given node `indices` and their handles across the center of
+  the selected nodes' bounding box. `axis` is `:horizontal` or `:vertical`."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (segment/flip-content content indices axis)))
+
 (defn- calc-bool-content*
   "Calculate the boolean content from shape and objects. Returns plain
   vector of segments"

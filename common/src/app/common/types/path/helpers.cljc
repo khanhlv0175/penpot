@@ -189,6 +189,48 @@
 
      (gpt/point (coord-v :x) (coord-v :y)))))
 
+(defn curve-closest-t
+  "Parameter `t` in [0, 1] of the point on the cubic `[start end h1 h2]`
+  closest to `position`, found by recursive subdivision down to
+  `precision`. A `line-to` is representable as `[start end start end]`."
+  [[start end h1 h2] position precision]
+  (let [d (fn [t] (gpt/distance position (curve-values start end h1 h2 t)))]
+    (loop [t1 0.0
+           t2 1.0]
+      (if (<= (mth/abs (- t1 t2)) precision)
+        t1
+        (let [ht  (+ t1 (/ (- t2 t1) 2))
+              ht1 (+ t1 (/ (- t2 t1) 4))
+              ht2 (+ t1 (/ (* 3 (- t2 t1)) 4))
+
+              [t1 t2] (cond
+                        (< (d ht1) (d ht2)) [t1 ht]
+                        (< (d ht2) (d ht1)) [ht t2]
+                        (and (< (d ht) (d t1)) (< (d ht) (d t2))) [ht1 ht2]
+                        (< (d t1) (d t2)) [t1 ht]
+                        :else [ht t2])]
+          (recur (double t1) (double t2)))))))
+
+(defn bend-curve-deltas
+  "Handler deltas `{:c1x :c1y :c2x :c2y}` that bend the cubic
+  `[start end h1 h2]` so its point at parameter `t` lands on `target`,
+  keeping the endpoints fixed. The required move of the on-curve point is
+  distributed between the two control points as the minimum-movement
+  (least-squares) solution weighted by their Bernstein basis at `t`, so a
+  straight segment (`h1`=start, `h2`=end) bulges symmetrically."
+  [[start end h1 h2 :as curve] t target]
+  (let [t'    (- 1.0 t)
+        b     (* 3.0 t' t' t)  ;; basis weight of h1 at t
+        c     (* 3.0 t' t t)   ;; basis weight of h2 at t
+        delta (gpt/subtract target (curve-values curve t))
+        denom (+ (* b b) (* c c))]
+    (if (mth/almost-zero? denom)
+      {:c1x 0.0 :c1y 0.0 :c2x 0.0 :c2y 0.0}
+      (let [k1 (/ b denom)
+            k2 (/ c denom)]
+        {:c1x (* k1 (:x delta)) :c1y (* k1 (:y delta))
+         :c2x (* k2 (:x delta)) :c2y (* k2 (:y delta))}))))
+
 (defn solve-roots*
   "Solvers a quadratic or cubic equation given by the parameters a b c d.
 

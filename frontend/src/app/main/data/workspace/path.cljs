@@ -54,6 +54,7 @@
 (dm/export tools/join-nodes)
 (dm/export tools/separate-nodes)
 (dm/export tools/toggle-snap)
+(dm/export tools/flip-nodes)
 
 ;; Undo/redo
 (dm/export undo/undo-path)

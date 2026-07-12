@@ -245,6 +245,8 @@
          (rx/of (apply-content-modifiers)))))))
 
 (declare drag-selected-segments)
+(declare start-segment-drag)
+(declare bend-selected-segment)
 
 (defn start-move-path-segment
   [index shift?]
@@ -259,8 +261,38 @@
         (streams/drag-stream
          (rx/of
           (when-not selected? (selection/select-segment index shift?))
-          (drag-selected-segments @ms/mouse-position))
+          (start-segment-drag index @ms/mouse-position))
          (rx/of (selection/select-segment index shift?)))))))
+
+(defn- segment-entry
+  [content index]
+  (d/seek #(= index (:index %)) (helpers/segment-entries content)))
+
+(defn- segment-base-curve
+  "The `[start end h1 h2]` cubic of a segment entry; a `line-to` is the
+  degenerate cubic with both control points at its endpoints."
+  [{:keys [from to segment]}]
+  (if (= :curve-to (:command segment))
+    [from to (path/get-handler segment :c1) (path/get-handler segment :c2)]
+    [from to from to]))
+
+(defn- start-segment-drag
+  "Dispatches a segment pointer-drag: with the platform modifier held, the
+  grabbed segment bends through the pointer while its endpoint nodes stay
+  fixed; otherwise the selected segments translate. Closing (`close-path`)
+  segments carry no handles and always translate."
+  [index start-position]
+  (ptk/reify ::start-segment-drag
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [content (st/get-path state :content)
+            entry   (segment-entry content index)
+            bend?   (and (deref ms/mouse-position-mod)
+                         (some? entry)
+                         (not= :close-path (:command (:segment entry))))]
+        (if bend?
+          (rx/of (bend-selected-segment index start-position))
+          (rx/of (drag-selected-segments start-position)))))))
 
 (defn drag-selected-segments
   [start-position]
@@ -284,6 +316,41 @@
                 (rx/map #(move-selected-path-segment start-position %))
                 (rx/take-until stopper))
            (rx/of (apply-content-modifiers))))))))
+
+(defn bend-segment-modifier
+  "Sets the content-modifiers that bend segment `index` (its base cubic
+  captured in `base-curve`) so the point grabbed at parameter `t` follows
+  `target`. `apply-content-modifiers` promotes a `line-to` to a `curve-to`
+  on receiving the handle deltas."
+  [index base-curve t target]
+  (ptk/reify ::bend-segment-modifier
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id        (st/get-path-id state)
+            deltas    (path.helpers/bend-curve-deltas base-curve t target)
+            modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})]
+        (assoc-in state [:workspace-local :edit-path id :content-modifiers]
+                  (assoc modifiers index deltas))))))
+
+(defn bend-selected-segment
+  [index start-position]
+  (ptk/reify ::bend-selected-segment
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [stopper    (mse/drag-stopper stream)
+            content    (st/get-path state :content)
+            entry      (segment-entry content index)
+            base-curve (segment-base-curve entry)
+            ;; parameter of the grabbed point, held fixed for the drag so
+            ;; that exact point tracks the pointer
+            t          (path.helpers/curve-closest-t base-curve start-position 0.001)]
+        (rx/concat
+         (->> ms/mouse-position
+              (rx/filter gpt/point?)
+              (rx/map streams/to-pixel-snap)
+              (rx/map #(bend-segment-modifier index base-curve t %))
+              (rx/take-until stopper))
+         (rx/of (apply-content-modifiers)))))))
 
 (defn- get-displacement
   "Retrieve the correct displacement delta point for the
