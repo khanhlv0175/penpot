@@ -1227,6 +1227,45 @@
     (t/is (= {:c1x 2.0 :c1y -5.0 :c2x 8.0 :c2y -5.0 :x 10.0 :y 0.0}
              (:params (second result))))))
 
+(t/deftest segment-separate-single-node
+  ;; separating one interior node splits the subpath into two open ends,
+  ;; the incoming node kept in place and the outgoing one offset
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 20.0 :y 0.0}}])
+        result  (vec (path/separate-nodes content #{(gpt/point 10.0 0.0)}))]
+    ;; move-to, line-to (to node1 kept at 10,0), move-to (node2 offset), line-to
+    (t/is (= [:move-to :line-to :move-to :line-to] (mapv :command result)))
+    (t/is (= {:x 10.0 :y 0.0} (:params (nth result 1))))
+    (t/is (= {:x 18.0 :y 8.0} (:params (nth result 2))))
+    (t/is (= {:x 20.0 :y 0.0} (:params (nth result 3))))))
+
+(t/deftest segment-separate-single-node-endpoint-noop
+  ;; an endpoint node has no following segment, so nothing is split
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 20.0 :y 0.0}}])
+        result  (vec (path/separate-nodes content #{(gpt/point 20.0 0.0)}))]
+    (t/is (= [:move-to :line-to :line-to] (mapv :command result)))))
+
+(t/deftest segment-separate-single-node-curve-carries-handler
+  ;; the outgoing curve's leading handler is shifted with the new start
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :curve-to :params {:c1x 12.0 :c1y 0.0 :c2x 18.0 :c2y 0.0 :x 20.0 :y 0.0}}])
+        result  (vec (path/separate-nodes content #{(gpt/point 10.0 0.0)}))
+        curve   (nth result 3)]
+    (t/is (= [:move-to :line-to :move-to :curve-to] (mapv :command result)))
+    (t/is (= {:x 18.0 :y 8.0} (:params (nth result 2))))
+    ;; c1 shifted by the same (8,8) offset, c2/end untouched
+    (t/is (= 20.0 (get-in curve [:params :c1x])))
+    (t/is (= 8.0 (get-in curve [:params :c1y])))
+    (t/is (= 18.0 (get-in curve [:params :c2x])))
+    (t/is (= 20.0 (get-in curve [:params :x])))))
+
 (t/deftest segment-flip-content-partial-selection
   ;; only the selected nodes and their handles move; others stay put
   (let [content (path/content

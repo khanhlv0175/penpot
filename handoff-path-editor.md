@@ -503,15 +503,21 @@ Work planned on top of the polished editor, with required groundwork:
    `:points` become an axis-aligned rectangle tightly wrapping the geometry. The
    non-WASM/legacy branch is left as the original `convert-to-path` (unverified there, so
    the reset is WASM-only for now).
-- [ ] **Feature 13 — separate a single selected node.** `separate-nodes` today needs a
-   selected segment (two adjacent nodes): `path_actions/check-enabled` sets
-   `:separate-nodes segments-selected?` and `segment/separate-nodes` removes the segments
-   between selected points. Extend it so a single selected node splits into two
-   coincident endpoints pulled a few px apart, so the user can grab and move them
-   easily — i.e. break the subpath at that node into two open ends (or an open end on
-   each side) and offset the two new endpoints by a small delta. Common geometry in
-   `common.types.path.segment`; enable the button/shortcut for the single-node case in
-   `path_actions/check-enabled`.
+- [x] **Feature 13 — separate a single selected node.** Completed 2026-07-12.
+   `segment/separate-nodes` now dispatches on selection size: two or more selected
+   points behave as before (drop the segments between them); a **single** selected node
+   is split by the new `separate-node`, which finds the interior node (a non-`move-to`
+   whose next command is a real segment), keeps the incoming side in place, and starts a
+   new subpath at the node offset by `separate-node-offset` (8,8), carrying the outgoing
+   curve's leading `c1` handle along so the tangent is preserved. `check-enabled`
+   (`path_actions.cljs`) enables the button for the single-node case
+   (`(or segments-selected? (= num-points 1))`); the `k` shortcut already fires
+   unconditionally. Note: `process-path-tool` runs `close-subpaths` afterwards, so on a
+   closed subpath the two offset ends stay a small distance apart (no re-merge) while the
+   loop opens at that node. Verified live: separating a triangle node opened the loop
+   with the two ends ~11 px apart; endpoint nodes and curve handlers covered by
+   pure-fn tests. Limitation: a node whose following command is the `close-path` seam is
+   not separable (its outgoing "segment" is the implicit closing line).
 - [ ] **Feature 14 — 15° angle constraint (was 45°).** Shift while drawing/moving snaps
    the next point to fixed angles from the previous point. The buckets are in
    `common/src/app/common/types/path/helpers.cljc` `closest-angle`, which currently snaps
@@ -526,7 +532,7 @@ Work planned on top of the polished editor, with required groundwork:
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Remaining roadmap items: 4, 9, 13, and 14.
+Remaining roadmap items: 4, 9, and 14.
 
 ## 7. Testing status
 

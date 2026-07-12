@@ -801,41 +801,84 @@
 
     (into content new-content)))
 
+(def ^:private separate-node-offset (gpt/point 8 8))
+
+(defn- separate-node
+  "Splits the subpath at the single interior node at `point` into two open
+  ends a small distance apart, so the user can grab and move them. The
+  incoming side keeps the node in place; the outgoing side starts a new
+  subpath shifted by `separate-node-offset`, carrying its leading handler
+  along so the curve tangent is preserved."
+  [content point]
+  (let [content (vec content)
+        n       (count content)
+        interior?
+        (fn [i]
+          (let [seg  (nth content i)
+                next (nth content (inc i) nil)]
+            (and (not= :move-to (:command seg))
+                 (= point (helpers/segment->point seg))
+                 (some? next)
+                 (not= :move-to (:command next))
+                 (not= :close-path (:command next)))))
+        idx (loop [i 0]
+              (cond
+                (>= i n)      nil
+                (interior? i) i
+                :else         (recur (inc i))))]
+    (if (nil? idx)
+      content
+      (let [{ox :x oy :y} separate-node-offset
+            move     (helpers/make-move-to (gpt/add point separate-node-offset))
+            next-seg (nth content (inc idx))
+            next-seg (cond-> next-seg
+                       (= :curve-to (:command next-seg))
+                       (-> (update-in [:params :c1x] + ox)
+                           (update-in [:params :c1y] + oy)))]
+        (-> (subvec content 0 (inc idx))
+            (conj move)
+            (conj next-seg)
+            (into (subvec content (+ idx 2))))))))
+
 (defn separate-nodes
-  "Removes the segments between the points given"
+  "Removes the segments between the points given. A single selected node is
+  instead split into two open ends a small distance apart (see
+  `separate-node`)."
   [content points]
+  (if (= 1 (count points))
+    (separate-node (vec content) (first points))
 
-  (let [content (d/with-prev content)]
-    (loop [result []
-           [cur-segment prev-segment] (first content)
-           content (rest content)]
+    (let [content (d/with-prev content)]
+      (loop [result []
+             [cur-segment prev-segment] (first content)
+             content (rest content)]
 
-      (if (nil? cur-segment)
-        (->> result
-             (filter #(> (count %) 1))
-             (flatten)
-             (into []))
+        (if (nil? cur-segment)
+          (->> result
+               (filter #(> (count %) 1))
+               (flatten)
+               (into []))
 
-        (let [prev-point (helpers/segment->point prev-segment)
-              cur-point (helpers/segment->point cur-segment)
+          (let [prev-point (helpers/segment->point prev-segment)
+                cur-point (helpers/segment->point cur-segment)
 
-              cur-segment (cond-> cur-segment
-                            (and (contains? points prev-point)
-                                 (contains? points cur-point))
+                cur-segment (cond-> cur-segment
+                              (and (contains? points prev-point)
+                                   (contains? points cur-point))
 
-                            (assoc :command :move-to
-                                   :params (select-keys (:params cur-segment) [:x :y])))
+                              (assoc :command :move-to
+                                     :params (select-keys (:params cur-segment) [:x :y])))
 
-              move? (= :move-to (:command cur-segment))
+                move? (= :move-to (:command cur-segment))
 
-              result (if move? (conj result []) result)
-              head-idx (dec (count result))
+                result (if move? (conj result []) result)
+                head-idx (dec (count result))
 
-              result (-> result
-                         (update head-idx conj cur-segment))]
-          (recur result
-                 (first content)
-                 (rest content)))))))
+                result (-> result
+                           (update head-idx conj cur-segment))]
+            (recur result
+                   (first content)
+                   (rest content))))))))
 
 
 (defn- add-to-set

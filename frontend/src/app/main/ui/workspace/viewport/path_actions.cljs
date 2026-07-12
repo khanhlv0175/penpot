@@ -65,7 +65,9 @@
        :remove-node points-selected?
        :merge-nodes segments-selected?
        :join-nodes (and points-selected? (>= num-points 2) (< num-segments max-segments))
-       :separate-nodes segments-selected?})))
+       ;; A single selected node separates into two offset nodes; two or
+       ;; more separate the segments between them.
+       :separate-nodes (or segments-selected? (= num-points 1))})))
 
 (mf/defc path-actions*
   [{:keys [shape state]}]
