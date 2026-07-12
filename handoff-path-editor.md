@@ -487,11 +487,46 @@ Work planned on top of the polished editor, with required groundwork:
    the Escape binding). Verified live: mirrors nodes+handles across the bbox center, is
    its own inverse (double-flip restores exactly), and the event round-trip exits clean.
 
+- [x] **Feature 12 — flatten a single path (reset its selrect to the x/y axes).**
+   Completed 2026-07-12. Flatten now works on a single selected path and resets its
+   rotated bounding box back to the standard axes without moving the shape. The context
+   menu (`context_menu.cljs`) gate was relaxed to also show flatten for a single path
+   (`(or (not has-path?) (and single? has-path?))`). `convert-selected-to-path`
+   (`path/shapes_to_path.cljs`) gained `flatten-path` for the already-`:path` case (WASM
+   branch): **WASM stores path `:content` in world coordinates** (rotation baked into the
+   content; `:transform`/`:selrect`/`:points` are oriented-bbox metadata), so flattening
+   must *not* re-bake the transform — it only clears `:rotation`/`:flip-x`/`:flip-y`/
+   `:transform`/`:transform-inverse` and re-derives `:selrect`/`:points` from the content
+   via `update-geometry`. (An initial attempt that baked `transform-matrix` into the
+   content double-rotated it — found and fixed live.) Verified live on WASM: rotate a
+   triangle 30°, flatten → content unchanged (shape stays put), `:rotation` 0, and
+   `:points` become an axis-aligned rectangle tightly wrapping the geometry. The
+   non-WASM/legacy branch is left as the original `convert-to-path` (unverified there, so
+   the reset is WASM-only for now).
+- [ ] **Feature 13 — separate a single selected node.** `separate-nodes` today needs a
+   selected segment (two adjacent nodes): `path_actions/check-enabled` sets
+   `:separate-nodes segments-selected?` and `segment/separate-nodes` removes the segments
+   between selected points. Extend it so a single selected node splits into two
+   coincident endpoints pulled a few px apart, so the user can grab and move them
+   easily — i.e. break the subpath at that node into two open ends (or an open end on
+   each side) and offset the two new endpoints by a small delta. Common geometry in
+   `common.types.path.segment`; enable the button/shortcut for the single-node case in
+   `path_actions/check-enabled`.
+- [ ] **Feature 14 — 15° angle constraint (was 45°).** Shift while drawing/moving snaps
+   the next point to fixed angles from the previous point. The buckets are in
+   `common/src/app/common/types/path/helpers.cljc` `closest-angle`, which currently snaps
+   to 45° increments (8 buckets) and feeds `position-fixed-angle` (used by draw preview
+   `preview-next-point`/`add-node`, shift node-drag, `drag-handler`, and
+   `move-handler-stream`). Change `closest-angle` to 15° increments (24 buckets: round to
+   the nearest multiple of 15) so all Shift-constrained path operations use the finer
+   angle. Trivial, but it changes every Shift constraint in the editor, not only the draw
+   preview — confirm that's intended (it matches "decrease it to 15 degrees").
+
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Remaining roadmap items: 4 and 9.
+Remaining roadmap items: 4, 9, 13, and 14.
 
 ## 7. Testing status
 

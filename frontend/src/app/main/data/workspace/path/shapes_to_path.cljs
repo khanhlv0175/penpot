@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
    [app.common.files.helpers :as cph]
+   [app.common.geom.matrix :as gmt]
    [app.common.geom.shapes :as gsh]
    [app.common.types.container :as ctn]
    [app.common.types.path :as path]
@@ -27,6 +28,22 @@
   [:x :y :width :height
    :rx :ry :r1 :r2 :r3 :r4
    :metadata])
+
+(defn- flatten-path
+  "Resets a path shape's rotation/flips and recomputes an axis-aligned
+  selrect from its content, so a rotated path's bounding box snaps back to
+  the standard x/y axes without moving the shape. The content is already in
+  world coordinates (the rotation is baked into it), so only the transform
+  metadata needs clearing."
+  [shape]
+  (-> shape
+      (assoc :rotation 0
+             :flip-x false
+             :flip-y false
+             :transform (gmt/matrix)
+             :transform-inverse (gmt/matrix))
+      (dissoc :selrect :points)
+      (path/update-geometry)))
 
 (defn convert-selected-to-path
   ([]
@@ -53,18 +70,22 @@
                    (pcb/update-shapes
                     selected
                     (fn [shape]
-                      (let [content (wasm.api/shape-to-path (:id shape))]
-                        (-> shape
-                            (assoc :type :path)
-                            (cond-> (cph/text-shape? shape)
-                              (assoc :fills
-                                     (->> (txt/node-seq txt/is-text-node? (:content shape))
-                                          (map :fills)
-                                          (first))))
-                            (cond-> (cph/image-shape? shape)
-                              (assoc :fill-image (get shape :metadata)))
-                            (d/without-keys dissoc-attrs)
-                            (path/update-geometry content)))))
+                      ;; An already-path shape only needs its transform baked
+                      ;; into the content to reset its selrect to the axes.
+                      (if (cph/path-shape? shape)
+                        (flatten-path shape)
+                        (let [content (wasm.api/shape-to-path (:id shape))]
+                          (-> shape
+                              (assoc :type :path)
+                              (cond-> (cph/text-shape? shape)
+                                (assoc :fills
+                                       (->> (txt/node-seq txt/is-text-node? (:content shape))
+                                            (map :fills)
+                                            (first))))
+                              (cond-> (cph/image-shape? shape)
+                                (assoc :fill-image (get shape :metadata)))
+                              (d/without-keys dissoc-attrs)
+                              (path/update-geometry content))))))
                    (pcb/remove-objects children-ids))]
            (rx/of (dch/commit-changes changes)))
 

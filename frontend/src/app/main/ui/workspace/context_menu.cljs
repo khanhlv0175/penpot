@@ -443,7 +443,11 @@
                         :shortcut (sc/get-tooltip :start-editing)
                         :on-click do-start-editing}])
 
-     (when-not (or disable-flatten has-frame? has-path?)
+     ;; Flatten a single path bakes its transform, resetting a rotated
+     ;; bounding box back to the x/y axes.
+     (when (and (not disable-flatten)
+                (not has-frame?)
+                (or (not has-path?) (and single? has-path?)))
        [:> menu-entry* {:title (tr "workspace.shape.menu.flatten")
                         :on-click do-transform-to-path}])
 
