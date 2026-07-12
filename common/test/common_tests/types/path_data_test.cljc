@@ -667,6 +667,65 @@
           result (path.subpath/close-subpaths content)]
       (t/is (seq result)))))
 
+(t/deftest subpath-close-loops
+  (t/testing "trailing line-to landing on the subpath start becomes a close-path"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 10.0}}
+                   {:command :line-to :params {:x 0.0 :y 0.0}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= [:move-to :line-to :line-to :close-path] (mapv :command result)))))
+
+  (t/testing "coincident endpoints within tolerance also close"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 0.05 :y 0.0}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= [:move-to :line-to :close-path] (mapv :command result)))))
+
+  (t/testing "curve landing on the subpath start keeps the curve and appends a close-path"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :curve-to :params {:c1x 10.0 :c1y 5.0 :c2x 5.0 :c2y 5.0 :x 0.0 :y 0.0}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= [:move-to :line-to :curve-to :close-path] (mapv :command result)))))
+
+  (t/testing "already command-closed content is unchanged"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 10.0}}
+                   {:command :close-path :params {}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= content (vec result)))))
+
+  (t/testing "open subpaths are left untouched"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 10.0}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= content (vec result)))))
+
+  (t/testing "multi-subpath content closes only the coincident loops"
+    (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 0.0 :y 0.0}}
+                   {:command :move-to :params {:x 20.0 :y 20.0}}
+                   {:command :line-to :params {:x 30.0 :y 20.0}}]
+          result  (path.subpath/close-loops content)]
+      (t/is (= [:move-to :line-to :close-path :move-to :line-to]
+               (mapv :command result))))))
+
+(t/deftest path-close-loops-path-data
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}
+                  {:command :line-to :params {:x 0.0 :y 0.0}}])
+        result  (path/close-loops content)]
+    (t/is (path.impl/path-data? result))
+    (t/is (= [:move-to :line-to :line-to :close-path]
+             (mapv :command (vec result))))))
+
 (t/deftest subpath-merge-touching-subpaths
   (t/testing "adjacent subpaths sharing an endpoint collapse into one chain"
     ;; Heroicons-style fragment: continuous polyline split as M-L M-L M-L
@@ -1101,6 +1160,195 @@
         result  (path.segment/remove-nodes content #{pt})]
     ;; should have fewer segments
     (t/is (< (count result) (count simple-open-content)))))
+
+(t/deftest helpers-fit-cubic-recovers-curve
+  ;; fitting samples of a known cubic recovers control points close to it
+  (let [curve   [(gpt/point 0.0 0.0) (gpt/point 30.0 0.0)
+                 (gpt/point 10.0 10.0) (gpt/point 20.0 10.0)]
+        samples (mapv #(path.helpers/curve-values curve (/ % 20.0)) (range 21))
+        tan1    (path.helpers/curve-tangent curve 0)
+        tan2    (gpt/negate (path.helpers/curve-tangent curve 1))
+        [h1 h2] (path.helpers/fit-cubic samples tan1 tan2)]
+    (t/is (mth/close? 10.0 (:x h1) 1.0))
+    (t/is (mth/close? 10.0 (:y h1) 1.0))
+    (t/is (mth/close? 20.0 (:x h2) 1.0))
+    (t/is (mth/close? 10.0 (:y h2) 1.0))))
+
+(t/deftest helpers-fit-curve-single-curve
+  ;; samples of one gentle cubic are fitted back with a single curve
+  (let [curve   [(gpt/point 0.0 0.0) (gpt/point 30.0 0.0)
+                 (gpt/point 10.0 10.0) (gpt/point 20.0 10.0)]
+        samples (mapv #(path.helpers/curve-values curve (/ % 24.0)) (range 25))
+        result  (path.helpers/fit-curve samples 0.5)]
+    (t/is (= 1 (count result)))
+    (let [[start end h1 h2] (first result)]
+      (t/is (= (gpt/point 0.0 0.0) start))
+      (t/is (= (gpt/point 30.0 0.0) end))
+      (t/is (mth/close? 10.0 (:x h1) 1.5))
+      (t/is (mth/close? 10.0 (:y h1) 1.5))
+      (t/is (mth/close? 20.0 (:x h2) 1.5))
+      (t/is (mth/close? 10.0 (:y h2) 1.5)))))
+
+(t/deftest helpers-fit-curve-splits-and-chains
+  ;; a sharp corner cannot be represented by one cubic: the fit splits
+  ;; into several curves chained on shared endpoints
+  (let [pts    (into []
+                     (concat
+                      (map #(gpt/point (double %) (double %)) (range 0 11))
+                      (map #(gpt/point (+ 10.0 %) (- 10.0 %)) (range 1 11))))
+        result (path.helpers/fit-curve pts 0.1)]
+    (t/is (> (count result) 1))
+    (t/is (every? (fn [[c1 c2]] (= (nth c1 1) (nth c2 0)))
+                  (map vector result (rest result))))
+    (t/is (= (gpt/point 0.0 0.0) (get-in result [0 0])))
+    (t/is (= (gpt/point 20.0 0.0) (nth (peek result) 1)))))
+
+(t/deftest helpers-fit-curve-respects-tolerance
+  ;; every input point stays within tolerance of the fitted sequence
+  (let [pts       (mapv #(gpt/point (double %) (* 5.0 (mth/sin (/ % 3.0))))
+                        (range 0 31))
+        tol       0.5
+        result    (path.helpers/fit-curve pts tol)
+        curve-pts (into []
+                        (mapcat (fn [c]
+                                  (map #(path.helpers/curve-values c (/ % 100.0))
+                                       (range 101))))
+                        result)
+        max-dev   (reduce max
+                          (map (fn [p]
+                                 (reduce min (map #(gpt/distance p %) curve-pts)))
+                               pts))]
+    (t/is (<= max-dev (+ tol 0.05)))))
+
+(t/deftest segment-smooth-points->content
+  (t/testing "two points produce a straight segment"
+    (let [content (path.segment/smooth-points->content
+                   [(gpt/point 0.0 0.0) (gpt/point 10.0 0.0)] 1.0)]
+      (t/is (= [:move-to :line-to] (mapv :command content)))))
+  (t/testing "freehand-like points produce fewer, fitted curve segments"
+    (let [pts     (mapv #(gpt/point (double %) (* 5.0 (mth/sin (/ % 3.0))))
+                        (range 0 31))
+          content (path.segment/smooth-points->content pts 1.0)
+          cmds    (mapv :command content)]
+      (t/is (= :move-to (first cmds)))
+      (t/is (every? #(= :curve-to %) (rest cmds)))
+      (t/is (< (count cmds) (count pts)))
+      (t/is (= {:x 0.0 :y 0.0} (:params (first (vec content)))))
+      (let [last-params (:params (peek (vec content)))]
+        (t/is (mth/close? 30.0 (:x last-params)))
+        (t/is (mth/close? (* 5.0 (mth/sin 10.0)) (:y last-params)))))))
+
+(t/deftest segment-remove-nodes-collinear-keeps-line
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 0.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 10.0 0.0)})]
+    (t/is (= [:move-to :line-to] (mapv :command result)))
+    (t/is (= {:x 20.0 :y 0.0} (:params (second result))))))
+
+(t/deftest segment-remove-nodes-corner-fits-curve
+  ;; removing the corner between two slanted lines produces a curve that
+  ;; keeps the old tangents at both ends and bulges towards the corner
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 10.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 10.0 10.0)})
+        curve   (second result)]
+    (t/is (= [:move-to :curve-to] (mapv :command result)))
+    (let [{:keys [c1x c1y c2x c2y x y]} (:params curve)
+          mid (path.helpers/curve-values (gpt/point 0.0 0.0) (gpt/point x y)
+                                         (gpt/point c1x c1y) (gpt/point c2x c2y) 0.5)]
+      (t/is (mth/close? 20.0 x))
+      (t/is (mth/close? 0.0 y))
+      ;; handlers stay on the removed segments' directions (45 degrees)
+      (t/is (mth/close? c1x c1y 0.01))
+      (t/is (mth/close? (- 20.0 c2x) c2y 0.01))
+      ;; the curve bulges towards the removed corner
+      (t/is (< 2.0 (:y mid) 10.0))
+      (t/is (mth/close? 10.0 (:x mid) 0.5)))))
+
+(t/deftest segment-remove-nodes-between-curves-approximates
+  ;; two quarter-circle arcs joined at the removed node collapse into a
+  ;; single curve close to the original semicircle
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :curve-to :params {:c1x 0.0 :c1y 5.52 :c2x 4.48 :c2y 10.0 :x 10.0 :y 10.0}}
+                 {:command :curve-to :params {:c1x 15.52 :c1y 10.0 :c2x 20.0 :c2y 5.52 :x 20.0 :y 0.0}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 10.0 10.0)})
+        curve   (second result)]
+    (t/is (= [:move-to :curve-to] (mapv :command result)))
+    (let [{:keys [c1x c1y c2x c2y x y]} (:params curve)
+          mid (path.helpers/curve-values (gpt/point 0.0 0.0) (gpt/point x y)
+                                         (gpt/point c1x c1y) (gpt/point c2x c2y) 0.5)]
+      ;; the apex of the original semicircle is preserved within a small error
+      (t/is (mth/close? 10.0 (:x mid) 0.5))
+      (t/is (mth/close? 10.0 (:y mid) 0.5)))))
+
+(t/deftest segment-remove-nodes-multiple-consecutive
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 5.0 :y 5.0}}
+                 {:command :line-to :params {:x 10.0 :y 7.0}}
+                 {:command :line-to :params {:x 15.0 :y 5.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 5.0 5.0)
+                                             (gpt/point 10.0 7.0)
+                                             (gpt/point 15.0 5.0)})
+        curve   (second result)]
+    (t/is (= [:move-to :curve-to] (mapv :command result)))
+    (let [{:keys [c1x c1y c2x c2y x y]} (:params curve)
+          mid (path.helpers/curve-values (gpt/point 0.0 0.0) (gpt/point x y)
+                                         (gpt/point c1x c1y) (gpt/point c2x c2y) 0.5)]
+      (t/is (mth/close? 10.0 (:x mid) 1.0))
+      (t/is (< 4.0 (:y mid) 8.5)))))
+
+(t/deftest segment-remove-nodes-endpoints-drop-segments
+  (let [content (path/content simple-open-content)]
+    (t/testing "removing the first node drops the leading segment"
+      (let [result (path.segment/remove-nodes content #{(gpt/point 0.0 0.0)})]
+        (t/is (= [:move-to :line-to] (mapv :command result)))
+        (t/is (= {:x 10.0 :y 0.0} (:params (first result))))))
+    (t/testing "removing the last node drops the trailing segment"
+      (let [result (path.segment/remove-nodes content #{(gpt/point 10.0 10.0)})]
+        (t/is (= [:move-to :line-to] (mapv :command result)))
+        (t/is (= {:x 10.0 :y 0.0} (:params (second result))))))))
+
+(t/deftest segment-remove-nodes-closed-path-keeps-closure
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 10.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}
+                 {:command :line-to :params {:x 0.0 :y 0.0}}
+                 {:command :close-path :params {}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 10.0 10.0)})]
+    (t/is (= [:move-to :curve-to :line-to :close-path] (mapv :command result)))))
+
+(t/deftest segment-remove-nodes-chain-ending-on-close-path
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 10.0}}
+                 {:command :close-path :params {}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 10.0 10.0)})]
+    ;; the geometry back to the start is approximated and the path stays closed
+    (t/is (= [:move-to :line-to :curve-to :close-path] (mapv :command result)))
+    (t/is (mth/close? 0.0 (get-in (vec result) [2 :params :x])))
+    (t/is (mth/close? 0.0 (get-in (vec result) [2 :params :y])))))
+
+(t/deftest segment-remove-nodes-removed-close-target
+  ;; when the subpath start is removed the path closes straight onto the
+  ;; new start instead of approximating across the seam
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y 10.0}}
+                 {:command :line-to :params {:x 20.0 :y 0.0}}
+                 {:command :line-to :params {:x 0.0 :y 0.0}}
+                 {:command :close-path :params {}}]
+        result  (path.segment/remove-nodes (path/content content)
+                                           #{(gpt/point 0.0 0.0)})]
+    (t/is (= [:move-to :line-to :close-path] (mapv :command result)))
+    (t/is (= {:x 10.0 :y 10.0} (:params (first result))))))
 
 (t/deftest segment-join-nodes
   (let [content (path/content simple-open-content)

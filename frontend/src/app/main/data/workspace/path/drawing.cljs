@@ -316,6 +316,24 @@
                          (cond-> (some? drop-index)
                            (with-meta {:index drop-index})))))))))
 
+(defn- close-drawn-loops
+  "Marks coincident-endpoint loops of the drawn shape with an explicit
+  close-path right before the shape is created. A loop closed with a plain
+  line-to renders two stroke caps at the seam instead of a join. This runs
+  after `finish-path` (which strips a dangling subpath start) and before
+  the shape is committed, so the created shape is already joined at the
+  seam even when it continues straight into edition without content
+  changes."
+  []
+  (ptk/reify ::close-drawn-loops
+    ptk/UpdateEvent
+    (update [_ state]
+      (d/update-in-when state [:workspace-drawing :object]
+                        (fn [object]
+                          (-> object
+                              (update :content path/close-loops)
+                              (path/update-geometry)))))))
+
 (defn- handle-drawing-end
   [shape-id restart?]
   (ptk/reify ::handle-drawing-end
@@ -333,12 +351,14 @@
         (cond
           (and (> (count content) 1) restart?)
           (rx/of (common/finish-path)
+                 (close-drawn-loops)
                  (setup-frame)
                  (dwdc/handle-finish-drawing)
                  (start-created-path-edition shape-id))
 
           (> (count content) 1)
-          (rx/of (setup-frame)
+          (rx/of (close-drawn-loops)
+                 (setup-frame)
                  (dwdc/handle-finish-drawing)
                  (dwe/clear-edition-mode))
 

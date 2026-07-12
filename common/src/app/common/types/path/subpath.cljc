@@ -189,6 +189,31 @@
 
     (into [] xf-mapcat-data closed-subpaths)))
 
+(defn- close-loop
+  "Ends a subpath whose endpoints coincide with an explicit close-path
+  command: a trailing line-to landing on the subpath start is replaced by
+  it, any other coincident ending gets one appended."
+  [{:keys [from to data] :as subpath}]
+  (let [last-seg (peek data)]
+    (if (or (< (count data) 2)
+            (= :close-path (:command last-seg))
+            (not (pt= from to)))
+      subpath
+      (let [data (cond-> data
+                   (= :line-to (:command last-seg)) (pop))]
+        (assoc subpath
+               :to from
+               :data (conj data {:command :close-path :params {}}))))))
+
+(defn close-loops
+  "Marks every subpath whose endpoints coincide as command-closed (see
+  `close-loop`). Without a close-path command the stroke renders two caps
+  at the seam instead of a proper join."
+  [content]
+  (->> (get-subpaths content)
+       (mapv close-loop)
+       (into [] xf-mapcat-data)))
+
 ;; FIXME: revisit this fn impl for perfromance
 (defn reverse-content
   "Given a content reverse the order of the commands"

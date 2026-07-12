@@ -215,29 +215,15 @@
   (let [content (impl/path-data content)]
     (segment/segment-entries content)))
 
-(defn- close-extracted-loops
-  "Turns a trailing line-to that lands exactly on its subpath start into an
-  explicit close-path, so a fully extracted loop stays a closed subpath with
-  a single start node."
-  [plain]
-  (let [total (count plain)]
-    (loop [index  0
-           start  nil
-           result []]
-      (if (< index total)
-        (let [{:keys [command params] :as cmd} (nth plain index)
-              start (if (= :move-to command) params start)
-              last-of-subpath?
-              (or (= (inc index) total)
-                  (= :move-to (:command (nth plain (inc index)))))
-              cmd   (if (and last-of-subpath?
-                             (= :line-to command)
-                             (= (:x params) (:x start))
-                             (= (:y params) (:y start)))
-                      {:command :close-path :params {}}
-                      cmd)]
-          (recur (inc index) start (conj result cmd)))
-        result))))
+(defn close-loops
+  "Marks every subpath whose endpoints coincide as command-closed: a
+  trailing line-to landing on the subpath start is replaced by a
+  close-path command, any other coincident ending gets one appended.
+  Without it the stroke renders two caps at the seam instead of a proper
+  join. Returns a PathData instance."
+  [content]
+  (-> (subpath/close-loops content)
+      (impl/from-plain)))
 
 (defn extract-content
   "Builds a new content from the sub-paths induced by the given selection of
@@ -270,9 +256,7 @@
                         (recur (next entries) entry result))
                       result))]
     (-> (close-subpaths (impl/path-data plain))
-        (vec)
-        (close-extracted-loops)
-        (impl/path-data))))
+        (close-loops))))
 
 (defn splice-content
   "Appends the given sub-content (subpaths starting with a move-to) to the
@@ -349,6 +333,12 @@
   "Given a vector of points generate a path content."
   [points & {:keys [close]}]
   (segment/points->content points :close close))
+
+(defn smooth-points->content
+  "Given a vector of points, generate a path content that smoothly
+  approximates them with fitted curves."
+  [points tolerance]
+  (segment/smooth-points->content points tolerance))
 
 (defn closest-point
   "Returns the closest point in the path to position, at a given precision."

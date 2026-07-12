@@ -581,78 +581,144 @@
                    :params (helpers/make-curve-params position prev-handler)}
       :else       {:command :move-to
                    :params position})))
-(defn remove-nodes
-  "Removes from content the points given. Will try to reconstruct the paths
-  to keep everything consistent"
-  [content points]
+(def ^:private ^:const chain-samples-per-segment 8)
 
+(defn- chain-samples
+  "Ordered positions along a chain of segments, including both endpoints.
+  Every chain entry holds the original segment plus explicit start and end
+  points (a close-path segment carries no end point of its own)."
+  [chain]
+  (into [(:start (first chain))]
+        (mapcat
+         (fn [{:keys [start end segment]}]
+           (let [ts (map #(/ (double %) chain-samples-per-segment)
+                         (range 1 (inc chain-samples-per-segment)))]
+             (if (= :curve-to (:command segment))
+               (let [curve (helpers/command->bezier segment start)]
+                 (map #(helpers/curve-values curve %) ts))
+               (map #(helpers/line-values [start end] %) ts)))))
+        chain))
+
+(defn- chain-tangent
+  "Unit tangent of a chain at one of its ends, pointing inward along the
+  chain. Falls back to the direction of the nearest distinct sample when
+  the end segment is degenerate; nil when every sample coincides."
+  [{:keys [start end segment]} at-start? origin samples]
+  (let [tangent
+        (if (= :curve-to (:command segment))
+          (let [curve (helpers/command->bezier segment start)]
+            (cond-> (helpers/curve-tangent curve (if at-start? 0 1))
+              (not at-start?) (gpt/negate)))
+          (if at-start?
+            (gpt/to-vec start end)
+            (gpt/to-vec end start)))
+        tangent (gpt/unit tangent)]
+    (if (gpt/almost-zero? tangent)
+      (->> samples
+           (map #(gpt/to-vec origin %))
+           (remove gpt/almost-zero?)
+           (map gpt/unit)
+           (first))
+      tangent)))
+
+(defn- flat-chain?
+  "Checks if every sample of a chain lies (almost) on the straight line
+  between its endpoints."
+  [start end samples]
+  (or (mth/almost-zero? (gpt/distance start end))
+      (every? #(< (gpt/point-line-distance % start end) 0.01) samples)))
+
+(defn- approximate-chain
+  "Builds the single segment that replaces a run of segments whose interior
+  nodes were removed: a plain line when the removed geometry is flat,
+  otherwise a bezier fitted through samples of the old geometry."
+  [chain]
+  (let [start   (:start (first chain))
+        end     (:end (peek chain))
+        samples (chain-samples chain)
+        tan1    (chain-tangent (first chain) true start (rest samples))
+        tan2    (chain-tangent (peek chain) false end (rest (rseq samples)))]
+    (if (or (flat-chain? start end samples)
+            (nil? tan1)
+            (nil? tan2))
+      (helpers/make-line-to end)
+      (let [[h1 h2] (helpers/fit-cubic samples tan1 tan2)]
+        (helpers/make-curve-to end h1 h2)))))
+
+(defn remove-nodes
+  "Removes from content the points given. The segments surrounding an
+  interior removed node are merged into one segment that approximates the
+  removed geometry; nodes removed at the ends of a subpath just drop their
+  segments. Will try to reconstruct the paths to keep everything consistent."
+  [content points]
   (if (empty? points)
     content
 
-    (let [content (d/with-prev content)]
+    (loop [result []
+           pending []
+           subpath-start nil
+           prev-point nil
+           segments (seq content)]
 
-      (loop [result []
-             last-handler nil
-             [cur-segment prev-segment] (first content)
-             content (rest content)]
+      (if (nil? segments)
+        ;; Every result entry is a subpath; discard the ones left with a
+        ;; single segment (only a starting point)
+        (into [] (comp (filter #(> (count %) 1)) cat) result)
 
-        (if (nil? cur-segment)
-          ;; The result with be an array of arrays were every entry is a subpath
-          (->> result
-               ;; remove empty and only 1 node subpaths
-               (filter #(> (count %) 1))
-               ;; flatten array-of-arrays plain array
-               (flatten)
-               (into []))
+        (let [segment (first segments)
+              move?   (= :move-to (:command segment))
+              close?  (= :close-path (:command segment))
+              point   (if close? subpath-start (helpers/segment->point segment))
+              remove? (and (not close?) (contains? points point))
 
-          (let [move? (= :move-to (:command cur-segment))
-                curve? (= :curve-to (:command cur-segment))
+              ;; When the old command is a move we start a subpath
+              result  (if move? (conj result []) result)
+              head    (dec (count result))
+              subpath (peek result)
 
-                ;; When the old command was a move we start a subpath
-                result (if move? (conj result []) result)
+              [result pending]
+              (cond
+                ;; Nodes removed before the first kept node of the subpath
+                ;; are dropped; later ones accumulate into a chain replaced
+                ;; when the next kept node arrives
+                remove?
+                [result (if (seq subpath)
+                          (conj pending {:start prev-point :end point :segment segment})
+                          [])]
 
-                subpath (peek result)
+                move?
+                [(update result head conj segment) []]
 
-                point (helpers/segment->point cur-segment)
+                ;; The subpath start was removed: the first kept node
+                ;; becomes the new start
+                (empty? subpath)
+                [(update result head conj (helpers/make-move-to point)) []]
 
-                old-prev-point (helpers/segment->point prev-segment)
-                new-prev-point (helpers/segment->point (peek subpath))
+                (seq pending)
+                (if (and close? (contains? points subpath-start))
+                  ;; The close target was removed too; the path closes
+                  ;; straight onto its new start
+                  [(update result head conj segment) []]
+                  (let [chain  (conj pending {:start prev-point :end point :segment segment})
+                        approx (approximate-chain chain)
+                        ;; A closing chain reduced to a zero-length line is
+                        ;; already drawn by the close-path itself
+                        skip?  (and close?
+                                    (= :line-to (:command approx))
+                                    (< (gpt/distance (:start (first chain)) point) 0.01))
+                        result (cond-> result
+                                 (not skip?) (update head conj approx)
+                                 close?      (update head conj segment))]
+                    [result []]))
 
-                remove? (contains? points point)
+                :else
+                [(update result head conj segment) []])]
 
-
-                ;; We store the first handler for the first curve to be removed to
-                ;; use it for the first handler of the regenerated path
-                cur-handler (cond
-                              (and (not last-handler) remove? curve?)
-                              (select-keys (:params cur-segment) [:c1x :c1y])
-
-                              (not remove?)
-                              nil
-
-                              :else
-                              last-handler)
-
-                cur-segment (cond-> cur-segment
-                              ;; If we're starting a subpath and it's not a move make it a move
-                              (and (not move?) (empty? subpath))
-                              (assoc :command :move-to
-                                     :params (select-keys (:params cur-segment) [:x :y]))
-
-                              ;; If have a curve the first handler will be relative to the previous
-                              ;; point. We change the handler to the new previous point
-                              (and curve? (seq subpath) (not= old-prev-point new-prev-point))
-                              (update :params merge last-handler))
-
-                head-idx (dec (count result))
-
-                result (cond-> result
-                         (not remove?)
-                         (update head-idx conj cur-segment))]
-            (recur result
-                   cur-handler
-                   (first content)
-                   (rest content))))))))
+          (recur result
+                 pending
+                 (if move? point subpath-start)
+                 point
+                 (next segments)))))))
 
 (defn join-nodes
   "Creates new segments between points that weren't previously.
@@ -927,3 +993,19 @@
                        (conj result {:command :close-path})
                        result)]
           (impl/from-plain result))))))
+
+(defn smooth-points->content
+  "Given a vector of points, fits a smooth sequence of cubic beziers
+  through them (within `tolerance`) and generates the path content.
+  Falls back to straight segments when there are not enough points to
+  fit a curve."
+  [points tolerance]
+  (let [curves (when (>= (count points) 3)
+                 (helpers/fit-curve points tolerance))]
+    (if (empty? curves)
+      (points->content points)
+      (impl/from-plain
+       (into [(helpers/make-move-to (ffirst curves))]
+             (map (fn [[_ end h1 h2]]
+                    (helpers/make-curve-to end h1 h2)))
+             curves)))))

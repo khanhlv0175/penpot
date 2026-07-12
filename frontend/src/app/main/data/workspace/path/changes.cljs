@@ -15,11 +15,16 @@
    [potok.v2.core :as ptk]))
 
 (defn- normalize-content
+  "Prepares editor content for persistence: drops a trailing subpath start
+  and marks coincident-endpoint loops with an explicit close-path (the
+  editor works with line-closed loops, but stored strokes need the
+  close-path to render a join at the seam)."
   [content preserve-move-to]
-  (if (and (not preserve-move-to)
-           (= (-> content last :command) :move-to))
-    (path/content (take (dec (count content)) content))
-    (path/content content)))
+  (-> (if (and (not preserve-move-to)
+               (= (-> content last :command) :move-to))
+        (take (dec (count content)) content)
+        content)
+      (path/close-loops)))
 
 (defn finalize-path-content
   [id]
@@ -33,13 +38,14 @@
             edit-content (get-in state [:workspace-drawing :object :content])
             new-content  (some-> edit-content (normalize-content false))]
         (cond
-          ;; A trailing move-to alone is not a real change, so the
-          ;; normalized content is compared too.
+          ;; The baseline is compared in its normalized form too, so that a
+          ;; lone trailing move-to or the seam close-path added on
+          ;; persistence do not, by themselves, look like a real change.
           (or (nil? shape)
               (nil? old-content)
               (nil? edit-content)
               (= old-content edit-content)
-              (= old-content new-content))
+              (= (path/close-loops old-content) new-content))
           (rx/empty)
 
           (empty? new-content)

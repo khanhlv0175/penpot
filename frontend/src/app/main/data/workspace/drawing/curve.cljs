@@ -26,6 +26,10 @@
 
 (def ^:const simplify-tolerance 0.3)
 
+;; Maximum deviation (in board units) between the sampled freehand points
+;; and the curves fitted through them on finish
+(def ^:const smooth-tolerance 1)
+
 (defn- setup-frame
   []
   (ptk/reify ::setup-frame
@@ -82,7 +86,7 @@
       (update-in state [:workspace-drawing :object]
                  (fn [{:keys [::points] :as shape}]
                    (let [points   (ups/simplify points simplify-tolerance)
-                         content  (path/points->content points)
+                         content  (path/smooth-points->content points smooth-tolerance)
                          selrect  (path/calc-selrect content)
                          points   (grc/rect->points selrect)]
 

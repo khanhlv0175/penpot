@@ -320,7 +320,8 @@
     (run-handle-drawing-end
      false
      (fn [emissions]
-       (t/is (= [::path.drawing/setup-frame
+       (t/is (= [::path.drawing/close-drawn-loops
+                 ::path.drawing/setup-frame
                  ::dwdc/handle-finish-drawing
                  ::dwe/clear-edition-mode]
                 (mapv ptk/type emissions)))
@@ -333,6 +334,7 @@
      true
      (fn [emissions]
        (t/is (= [::path.common/finish-path
+                 ::path.drawing/close-drawn-loops
                  ::path.drawing/setup-frame
                  ::dwdc/handle-finish-drawing
                  ::path.drawing/start-created-path-edition]
@@ -429,7 +431,12 @@
           id              (:id original-rect)
           delta           (gpt/point 10 5)
           original-path   (path/convert-to-path original-rect)
-          changed-content (path/move-content (:content original-path) delta)
+          ;; A rect converts to a loop closed with a trailing line-to; on
+          ;; persistence that loop gets an explicit close-path so the stroke
+          ;; joins at the seam.
+          changed-content (-> (:content original-path)
+                              (path/move-content delta)
+                              (path/close-loops))
           expected-shape  (-> original-path
                               (assoc :content changed-content)
                               (path/update-geometry))

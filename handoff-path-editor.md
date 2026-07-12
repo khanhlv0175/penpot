@@ -1,6 +1,6 @@
 # Handoff: Path editor investigation (event ordering / polishing)
 
-Initial investigation: 2026-07-02. Last updated: 2026-07-10. Goal: polish the path
+Initial investigation: 2026-07-02. Last updated: 2026-07-11. Goal: polish the path
 (pen tool) editor; several event-ordering problems cause unexpected results. This
 document is the source of truth for work between sessions. A copy of the original
 findings also lives in Serena memory
@@ -317,6 +317,38 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   superseding-edition (non-restart) or `finish-path`/double-click (restart).
   Restarting `handle-drawing-end` also emits `finish-path` first, so restarts don't
   carry pending state into the continued edition.
+- [x] **Bug 12 — closing a path does not join the last point cleanly (visual).** Fixed
+  2026-07-12. Confirmed cause: a closed loop was persisted as `M A … L A` (a line-to
+  landing back on the start) with no `:close-path` command, so the stroke rendered two
+  butt caps at the seam instead of a join. `close-subpaths`/`is-closed?` only compare
+  endpoint positions and never emit a `:close-path`. Fix (common): new
+  `subpath/close-loops` + `path/close-loops` — for every subpath whose endpoints
+  coincide (within the 0.1 `pt=` tolerance), replace a trailing `line-to` landing on the
+  start with a `:close-path` command, or append one after any other coincident ending
+  (e.g. a `curve-to`). `extract-content`'s ad-hoc `close-extracted-loops` was removed and
+  now delegates to `close-loops`. The editor keeps working with line-closed loops during
+  edition (the editor draws its own thin outline, so the seam is never visibly broken
+  mid-edit); the close-path is materialized only at persistence:
+  - **Draw flow**: `drawing/close-drawn-loops` runs in `handle-drawing-end` (both the
+    restart and the non-restart >1-segment branches) right before the shape is created,
+    so a freshly drawn+closed path is created already joined. This is required because a
+    draw→close→continued-edition→exit with no further changes has
+    `old-content == edit-content` and `finalize-path-content` would short-circuit,
+    never closing it.
+  - **Edit-existing flow**: `changes/normalize-content` runs `close-loops` before
+    persisting a genuinely changed path. The no-op guard now compares
+    `(close-loops old-content)` against `new-content` so opening an already
+    line-closed shape and exiting without changes (or with only a dangling trailing
+    move-to) is still a no-op and does not rewrite the shape / convert a rect to a path.
+  Verified: common suite 1089 tests / 24524 assertions (6 new `subpath-close-loops`
+  cases + `path-close-loops-path-data`); frontend focused suite 28 tests / 68
+  assertions (draw-end emission tests now assert `close-drawn-loops` fires;
+  `changed-path-edition-is-persisted-when-finalized` asserts the persisted content is
+  close-looped); lint/format clean. Live (running dev build, `close-loops` called on
+  real store shapes): the exact bug shape `M394,149…L389,214L394,149` →
+  `…L389,214Z`; a multi-subpath icon closes each of its 3 coincident loops
+  independently, preserving a `curve-to` ending before its `Z`; genuinely open paths are
+  left unchanged.
 
 ## 6. Refactors and features checklist
 
@@ -369,35 +401,78 @@ Work planned on top of the polished editor, with required groundwork:
    (`select-path-area` computes the lower-priority sets lazily). Live-verified with
    real drags on a bowed curve: curve-only rect → segment, rect with a node → that
    node only, handler-only rect → that handler, rect over everything → all nodes.
-- [ ] **Feature 4 — round corners in a path.** Fits the existing `process-path-tool` pipeline
-   (like make-corner/make-curve); main work is a corner-fillet geometry fn in
-   `common.types.path`. If a per-node radius becomes a persistent, editable property
-   (rather than a one-shot transform), node identity matters again — per-node params
-   can't be keyed by position.
-- [ ] **Feature 5 — alignment of nodes (snap).** `app.main.snap` ranges already power node/handler
-   snapping (`move-points-stream`, `path-snap*` guides). This adds alignment guides
-   between nodes and possibly explicit "align/distribute selected nodes" tools (the
-   latter is a simple `process-path-tool`). Modest groundwork; mostly independent.
-- [ ] **Feature 6 — improve curve-tool smoothing** (currently produces line segments only). NOTE: the
-   freehand curve tool lives *outside* the path editor:
-   `frontend/src/app/main/data/workspace/drawing/curve.cljs`. Work = curve fitting
-   (e.g. Schneider/least-squares bezier fit) in common, applied on finish. Independent
-   of the event-ordering polish, but shares the fitting math with feature 7.
-- [ ] **Feature 7 — remove node with curve approximation.** Change `path/remove-nodes` (common) so the
-   surviving segment approximates the removed geometry (fit a cubic through the old
-   points instead of straight-joining). Pure common-layer geometry; shares the
-   bezier-fitting utility with feature 6. Test-first friendly (pure functions).
+- [ ] **Feature 4 — border radius in path corners (round corners).** Fits the existing
+   `process-path-tool` pipeline (like make-corner/make-curve); main work is a
+   corner-fillet geometry fn in `common.types.path`. If a per-node radius becomes a
+   persistent, editable property (rather than a one-shot transform), node identity
+   matters again — per-node params can't be keyed by position.
+- **Feature 5 — alignment of nodes (snap). Dropped 2026-07-11:** the current snapping
+   behaviour is considered good enough; no further work planned here.
+- [x] **Feature 6 — improve curve-tool smoothing.** Completed 2026-07-11. Common:
+   `helpers/fit-curve` implements the full Schneider FitCurves algorithm on top of the
+   feature-7 `fit-cubic` (which gained a `[points params tan1 tan2]` arity): per region
+   it fits one cubic against chord-length parameters, computes the max squared sample
+   error, refines the parameterization with up to 4 Newton-Raphson passes while the
+   error is within 4× tolerance, and otherwise splits at the worst sample sharing the
+   center tangent (`(p[i-1] − p[i+1])`, sign-flipped for the right side) so joins stay
+   G1-smooth; consecutive points closer than 0.01 are deduped up front. Returns chained
+   `[start end h1 h2]` curves. `segment/smooth-points->content` (+ `path.cljc` wrapper)
+   converts the fit into `move-to`+`curve-to` content, falling back to the polyline
+   `points->content` below 3 points. Frontend: `drawing/curve.cljs` `finish-drawing`
+   now calls `smooth-points->content` with `smooth-tolerance` 1 (board units) after the
+   existing RDP `ups/simplify` 0.3 pass; the live preview while drawing stays the cheap
+   polyline. Verified live: a freehand S-wave (11 sampled points) committed as 4 chained
+   curve-to segments rendering a smooth wave; a V stroke kept straight arms with a
+   softly rounded valley (single tangent-aligned cubic within tolerance — dense
+   sharp-corner data still splits, unit-tested).
+- [x] **Feature 7 — remove node with curve approximation.** Completed 2026-07-11.
+   Common layer only. `helpers/fit-cubic` (in `common.types.path.helpers`) is the
+   shared least-squares bezier fit (Graphics Gems FitCurves generate-bezier step:
+   fixed endpoints, chord-length parameterization, solve the two handler lengths
+   along given end tangents, Wu/Barsky chord/3 fallback on degenerate solutions) —
+   feature 6 should reuse it. `segment/remove-nodes` was rewritten: consecutive
+   removed nodes accumulate into a chain; when the next kept node arrives the whole
+   chain (8 samples per original segment) is replaced by one segment — a plain
+   `line-to` when the old geometry is flat against the chord (< 0.01 px), otherwise a
+   `curve-to` fitted through the samples with tangents taken from the original end
+   segments (fallback to nearest-distinct-sample direction when a tangent is
+   degenerate). Removed nodes at the ends of a subpath still just drop their
+   segments; a chain ending on `close-path` fits toward the subpath start and keeps
+   the `close-path` (a zero-length flat closing line is skipped); when the close
+   target itself was removed the path closes straight onto its new start (no
+   wrap-around fit across the seam — same asymmetry as before). Verified live with
+   real gestures: corner polyline → symmetric fitted curve with handlers exactly
+   along the old segment directions, path-local undo/redo restores/reapplies it,
+   exit persists one commit; collinear middle node → stays a plain line; ellipse
+   right node → the two arcs merge into one closed fitted curve.
 - [x] **Feature 8 — multi-select and move path handlers.** Completed 2026-07-10.
    Plain click replaces handler selection; Shift+click toggles it; selected handles are
    filled. Dragging any selected handler translates the full selected set using the
    snapped primary delta. Existing opposite-handler angle matching is preserved for
    unselected opposites and suppressed between two selected opposites so neither can
    overwrite the other's movement.
+- [ ] **Feature 9 — improve single line selection and transformation.** Not directly
+   part of the path editor, but important when the pen tool is used to create a single
+   straight line: the resulting shape's selrect is degenerate (zero width or height for
+   axis-aligned lines), which makes selecting and transforming the shape in the normal
+   workspace awkward. Improve hit-testing/selection and the transform handles for
+   line-like paths outside the editor.
+- [ ] **Feature 10 — move segments without moving the nodes.** A segment drag mode that
+   keeps both endpoint nodes fixed and bends the segment into a curve passing through
+   the cursor position (today's segment drag — feature 1 — translates the endpoint
+   nodes instead; both behaviours need to coexist, e.g. via a modifier key). Geometry:
+   for the grabbed parameter `t`, solve the `curve-to` handler deltas so the bezier
+   passes through the cursor point (`helpers/curve-values`/`fit-cubic` in
+   `common/src/app/common/types/path/helpers.cljc` are the building blocks); a plain
+   `line-to` converts to a `curve-to` on first bend, like
+   `path/apply-content-modifiers` already does when it receives `c1x/c1y` deltas.
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
-for features 1–3 and 8 is complete. Feature 4 can reuse the same node identity. Features
-5–7 are mostly common-layer geometry and can proceed in parallel; a shared
-bezier-fitting utility in `common.types.path` serves both 6 and 7.
+for features 1–3 and 8 is complete. Feature 4 can reuse the same node identity, and its
+fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
+(`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
+Feature 10 keys on segment identity (command index), which is already in place.
+Remaining roadmap items: 4, 9, and 10.
 
 ## 7. Testing status
 
@@ -493,6 +568,55 @@ Validation for segment/handler selection and grouped movement on 2026-07-10:
 - `pnpm run lint:clj`: 0 errors, 0 warnings; `pnpm run check-fmt:clj`: clean.
 - Real pointer gestures were not re-run in this pass; the remaining manual checklist in
   §8 still applies.
+
+Validation for feature 7 (remove node with curve approximation) on 2026-07-11:
+
+- New pure-function tests in `common/test/common_tests/types/path_data_test.cljc`:
+  `helpers-fit-cubic-recovers-curve` plus eight `segment-remove-nodes-*` cases
+  (collinear→line, corner→fitted curve with preserved 45° tangents, two circle arcs →
+  single curve within 0.5 px of the apex, multiple consecutive removals, endpoint
+  drops, closed-path closure kept, chain ending on close-path, removed close target).
+- Full common suite (JVM kaocha): 1083 tests / 24497 assertions, 0 failures. CLJS
+  (shadow `:test` build, node): 942 tests / 23856 assertions, 0 failures.
+- `pnpm run lint:clj` 0/0 and `check-fmt:clj` clean in `common/`; main CLJS build `:ok`;
+  frontend focused suite `frontend-tests.logic.path-edition-test` 28 tests /
+  68 assertions, 0 failures (devenv container).
+- Live gestures (Playwright, fresh devenv workspace page): pen-drew `M162,640 L282,500
+  L402,640`, exit, re-enter, node click → `{:nodes #{1}}`, Delete →
+  `C283.08,498.74 280.92,498.74` fitted curve (handlers exactly along the removed
+  segments' directions, curve bulging to the old corner); path-local Ctrl+Z/Ctrl+Shift+Z
+  restored/reapplied it; exit persisted exactly that content with edition/edit-path/
+  drawing all cleared and no exception. Collinear 3-node line → Delete healed to
+  `M162,800 L402,800` (plain line). Ellipse → Enter (drawing-copy conversion), removed
+  the right node → both right arcs merged into one closed fitted curve
+  (`C339.92,880 339.92,980`, horizontal tangents kept at top/bottom); committed on exit.
+  Note: the Delete key drives the removal (path shortcuts), no toolbar click needed;
+  browser↔penpot coords on that session were a plain −318 px x-offset at 100% zoom.
+- Root-owned stale caches (`.shadow-cljs/.../clipboard.cljs.cache.transit.json`,
+  `target/tests/cljs-runtime/app.main.data.workspace.path.clipboard.js{,.map}`) from a
+  root-run build had to be deleted before the frontend test build could run.
+
+Validation for feature 6 (curve-tool smoothing) on 2026-07-11:
+
+- New tests in `path_data_test.cljc`: `helpers-fit-curve-single-curve` (samples of one
+  cubic recovered as one curve), `helpers-fit-curve-splits-and-chains` (sharp corner
+  splits into chained curves with shared endpoints), `helpers-fit-curve-respects-tolerance`
+  (max deviation of every input point ≤ tolerance against densely sampled fit), and
+  `segment-smooth-points->content` (2-point fallback to line; wave → move-to + all
+  curve-to, fewer commands than points, endpoints preserved).
+- Full common suite: JVM 1087 / 24516, CLJS 946 / 23875, all 0 failures; common and
+  frontend `lint:clj` 0/0; `check-fmt:clj` clean; main build `:ok`.
+- Live (Playwright): freehand S-wave with the curve tool (Shift+C) committed
+  `:move-to` + 4 `:curve-to` and rendered smooth; V stroke → straight arms, rounded
+  valley. **Environment trap found:** the Playwright-managed browser tab reports
+  `document.visibilityState === "hidden"`, so Chrome intensive timer throttling reduces
+  `rx/sample 10` (RxJS `sampleTime`) to ~2-3 emissions/s — input events still flow
+  (pointermove and `ms/mouse-position` update normally), but the curve tool's sampled
+  point stream starves and fast drags record only 2-3 points, committing as a short
+  line. `page.bringToFront()` does not fix visibility in this setup. Workaround for
+  gesture tests of the curve tool: drag slowly (~300 ms per step, ~5-10 s per stroke)
+  so even throttled sampling collects enough points. Root-owned `.clj-kondo` cache for
+  the clipboard namespace also had to be deleted (same root-run-build cause as above).
 
 ## 8. Suggested plan
 
@@ -676,3 +800,71 @@ Regression tests added for all five (`cancel-pending-segment-drops-dangling-subp
 `group-handler-drag-ignores-stale-handler-identities`). Focused suite: 25 tests /
 62 assertions, 0 failures (devenv container). `lint:clj` 0/0, `check-fmt:clj` clean,
 main build `:ok`.
+
+## 13. Branch review — correctness & performance pass (2026-07-11)
+
+Full re-review of the branch (committed work incl. copy/paste `8f17e6ad82` and marquee
+priority `412d98c609`, plus the uncommitted features 6/7 common-layer work) and of every
+path-editor surface file. No correctness bug requiring a fix was found. Notes worth
+keeping:
+
+Correctness observations (accepted behaviour, not defects):
+
+- `fit-curve` with only 2 points left after the 0.01 dedup emits a `curve-to` for a
+  straight chord (handlers at thirds). Harmless, slightly heavier content than a
+  `line-to`.
+- The documented position-based collapses persist at the common-fn boundary:
+  `remove-nodes` selects victims by position, the editor's handler grouping
+  (`path/get-handlers`) and the `is-last` check are position-keyed. Duplicate-coordinate
+  nodes remain ambiguous only there.
+- `path_actions/check-enabled` and Delete only consider `:selection :nodes`: with a
+  segment- or handler-only selection the top bar is fully disabled and Delete is a
+  no-op. UX gap to revisit (e.g. Delete on a segment selection could remove the
+  segment's endpoints or open feature-10-style behaviour).
+- Pre-existing on develop (not branch work): the `:move-unit-left`/`:move-unit-right`
+  path-shortcut map keys and tooltips are swapped relative to their direction
+  (behaviour is correct; only the shortcut-panel labelling is off).
+
+Performance observations (no action needed yet; relevant for very large paths):
+
+- During node/segment/handler drags every pointermove re-runs in `path-editor*`:
+  `apply-content-modifiers` over the full content, `get-points`, node/segment/handler
+  entry recomputation, a full-path `.toString`, and two PathData+`toString` builds per
+  segment hit target. O(n) work + allocation churn per frame. If it ever matters:
+  memoize per-segment content on stable values or skip segment hit targets while a drag
+  is active.
+- With snap toggled on, `path-snap*` recomputes `snap/create-ranges` every frame during
+  a drag (its memo key includes the moving points); the drag pipeline itself already
+  builds ranges once per gesture in `move-points-stream`. Deriving the editor ranges
+  from the drag-start content would make it once per gesture too.
+- Marquee hit-testing is already frame-throttled (16 ms); `segments-in-rect` flattens
+  curves per tick, which is fine at that rate.
+
+## 14. Maybe — ideas worth considering (not committed)
+
+A parking lot for things that might be worth doing but haven't been decided. Each entry
+records the trade-off, not a plan; promote to a numbered bug/feature only once decided.
+
+- **One-time migration to close existing coincident-endpoint loops.** Bug 12 only fixes
+  loops going forward (at draw/edit persistence); shapes already saved with the broken
+  `M A … L A` seam (no `:close-path`) stay broken until they are next edited. A file-data
+  migration could run `path/close-loops` over every path shape so already-created shapes
+  render a proper stroke join on load.
+  - **Pro:** those shapes are objectively incorrect today — the stroke seam has two butt
+    caps instead of a join; the migration makes them render correctly with no user action.
+  - **Con:** it rewrites already-created shapes. Changing persisted user content in a
+    migration is a heavier commitment than a forward-only fix — it must be exactly
+    shape-preserving (only line-to→close-path / append close-path on genuinely coincident
+    endpoints, within the `0.1` `pt=` tolerance) and needs the usual migration care
+    (version bump, validation across consumers, undo/history implications, library-shared
+    files).
+  - **Cost:** `close-loops` is O(n) in commands and cheap per element (one `gpt/distance`
+    per subpath; no curve flattening). Measured on the dev build: ~8 ms / 1k commands,
+    ~70 ms / 10k, ~360 ms / 50k — dominated by `PathData` unpack/repack, not the check.
+    Real paths are tens–hundreds of commands (sub-ms). Whole-file cost is linear in total
+    command count, negligible next to file load.
+  - **If pursued:** make the migration short-circuit unchanged content — as written
+    `close-loops` always repacks the `PathData` even for open paths (a semantic no-op), so
+    a naive pass would emit a change record for *every* path in the file. Add a cheap
+    "did any subpath actually close?" guard before the repack/write-back so the change set
+    (and sync/history churn) is limited to the shapes that genuinely need fixing.
