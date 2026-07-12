@@ -457,22 +457,41 @@ Work planned on top of the polished editor, with required groundwork:
    axis-aligned lines), which makes selecting and transforming the shape in the normal
    workspace awkward. Improve hit-testing/selection and the transform handles for
    line-like paths outside the editor.
-- [ ] **Feature 10 — move segments without moving the nodes.** A segment drag mode that
-   keeps both endpoint nodes fixed and bends the segment into a curve passing through
-   the cursor position (today's segment drag — feature 1 — translates the endpoint
-   nodes instead; both behaviours need to coexist, e.g. via a modifier key). Geometry:
-   for the grabbed parameter `t`, solve the `curve-to` handler deltas so the bezier
-   passes through the cursor point (`helpers/curve-values`/`fit-cubic` in
-   `common/src/app/common/types/path/helpers.cljc` are the building blocks); a plain
-   `line-to` converts to a `curve-to` on first bend, like
-   `path/apply-content-modifiers` already does when it receives `c1x/c1y` deltas.
+- [x] **Feature 10 — move segments without moving the nodes.** Completed 2026-07-12.
+   A segment drag with the platform modifier held (`ms/mouse-position-mod`, ctrl on
+   win/linux, meta on mac) bends the grabbed segment through the pointer while its
+   endpoint nodes stay fixed; without the modifier it translates the endpoint nodes as
+   before (feature 1). Common (`helpers.cljc`): `curve-closest-t` (recursive subdivision,
+   parameter of the grabbed point) and `bend-curve-deltas` (handle deltas that move the
+   on-curve point at `t` onto the target, distributed to both control points as the
+   minimum-movement least-squares solution weighted by the Bernstein basis, so a straight
+   segment bulges symmetrically). Frontend (`edition.cljs`): `start-move-path-segment`
+   now dispatches through `start-segment-drag`, which reads the modifier at drag-confirm
+   and routes to either `drag-selected-segments` (translate) or `bend-selected-segment`
+   (bend). The bend captures the grab `t` once (so that exact point tracks the pointer),
+   represents a `line-to` as the degenerate cubic `[start end start end]`, and each tick
+   sets `content-modifiers` `{index {:c1x… :c2x…}}`; `path/apply-content-modifiers`
+   promotes the `line-to` to `curve-to` on the handle deltas. `close-path` segments carry
+   no handles and always translate. Verified live: Ctrl-dragging a line segment produced
+   a `curve-to` whose point at t=0.5 landed exactly on the target with both endpoint nodes
+   fixed; pure-fn tests cover `curve-closest-t` and the passes-through-target property.
+- [x] **Feature 11 — flip selected nodes horizontally / vertically.** Completed
+   2026-07-12 (requested mid-session). `Shift+H` / `Shift+V` mirror the selected nodes
+   (or the whole path when nothing is selected) across the center of their bounding box:
+   horizontal reflects x, vertical reflects y. Common (`segment/flip-content`, wrapped by
+   `path/flip-content`): reflects each selected node's anchor and the handles owned by a
+   selected node (`c1` of command i belongs to node i-1, `c2` to node i), so a fully
+   selected path/subpath mirrors cleanly. Frontend: `tools/flip-nodes` (indices are
+   preserved, so the selection stays valid; no structural change). Bound in
+   `shortcuts.cljs`; `Shift+H/V` were free (`Ctrl+V` stays node-paste, plain `v` stays on
+   the Escape binding). Verified live: mirrors nodes+handles across the bbox center, is
+   its own inverse (double-flip restores exactly), and the event round-trip exits clean.
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
-for features 1–3 and 8 is complete. Feature 4 can reuse the same node identity, and its
-fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
+for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
+and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Feature 10 keys on segment identity (command index), which is already in place.
-Remaining roadmap items: 4, 9, and 10.
+Remaining roadmap items: 4 and 9.
 
 ## 7. Testing status
 

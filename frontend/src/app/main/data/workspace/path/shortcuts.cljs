@@ -104,6 +104,16 @@
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/paste-nodes))}
 
+   :flip-horizontal {:tooltip (ds/shift "H")
+                     :command "shift+h"
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/flip-nodes :horizontal))}
+
+   :flip-vertical   {:tooltip (ds/shift "V")
+                     :command "shift+v"
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/flip-nodes :vertical))}
+
    :escape          {:tooltip (ds/esc)
                      :command ["escape" "enter" "v"]
                      :fn #(st/emit! (esc-pressed))}

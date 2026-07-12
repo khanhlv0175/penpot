@@ -218,7 +218,7 @@
   distributed between the two control points as the minimum-movement
   (least-squares) solution weighted by their Bernstein basis at `t`, so a
   straight segment (`h1`=start, `h2`=end) bulges symmetrically."
-  [[start end h1 h2 :as curve] t target]
+  [curve t target]
   (let [t'    (- 1.0 t)
         b     (* 3.0 t' t' t)  ;; basis weight of h1 at t
         c     (* 3.0 t' t t)   ;; basis weight of h2 at t

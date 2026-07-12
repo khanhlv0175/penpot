@@ -1174,6 +1174,69 @@
     (t/is (mth/close? 20.0 (:x h2) 1.0))
     (t/is (mth/close? 10.0 (:y h2) 1.0))))
 
+(t/deftest helpers-curve-closest-t
+  ;; a straight segment as a degenerate cubic: the midpoint maps to ~0.5 by
+  ;; symmetry, and for any queried point the returned parameter's curve point
+  ;; lands back on the query (the parameterization is nonlinear but consistent)
+  (let [curve [(gpt/point 0.0 0.0) (gpt/point 10.0 0.0)
+               (gpt/point 0.0 0.0) (gpt/point 10.0 0.0)]]
+    (t/is (mth/close? 0.5 (path.helpers/curve-closest-t curve (gpt/point 5.0 0.0) 0.001) 0.01))
+    (doseq [q [(gpt/point 2.5 0.0) (gpt/point 7.0 0.0)]]
+      (let [t (path.helpers/curve-closest-t curve q 0.001)
+            p (path.helpers/curve-values curve t)]
+        (t/is (mth/close? (:x q) (:x p) 0.05))))))
+
+(t/deftest helpers-bend-curve-deltas-passes-through-target
+  ;; the handle deltas move the point at t exactly onto the target, for any t
+  (let [curve  [(gpt/point 0.0 0.0) (gpt/point 10.0 0.0)
+                (gpt/point 0.0 0.0) (gpt/point 10.0 0.0)]]
+    (doseq [t      [0.3 0.5 0.7]
+            target [(gpt/point 5.0 4.0) (gpt/point 3.0 -6.0)]]
+      (let [{:keys [c1x c1y c2x c2y]} (path.helpers/bend-curve-deltas curve t target)
+            bent [(gpt/point 0.0 0.0) (gpt/point 10.0 0.0)
+                  (gpt/point c1x c1y) (gpt/point (+ 10.0 c2x) c2y)]
+            p    (path.helpers/curve-values bent t)]
+        (t/is (mth/close? (:x target) (:x p) 0.001))
+        (t/is (mth/close? (:y target) (:y p) 0.001))))))
+
+(t/deftest segment-flip-content-horizontal
+  ;; mirror every node across the bbox center on the vertical axis
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}])
+        result  (path/flip-content content #{0 1 2} :horizontal)
+        pts     (mapv (comp (juxt :x :y) :params) (vec result))]
+    (t/is (= [[10.0 0.0] [0.0 0.0] [0.0 10.0]] pts))))
+
+(t/deftest segment-flip-content-curve-handles
+  ;; a curve mirrors its anchors and both handles, keeping shape symmetry
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :curve-to :params {:c1x 2.0 :c1y 5.0 :c2x 8.0 :c2y 5.0 :x 10.0 :y 0.0}}])
+        result  (vec (path/flip-content content #{0 1} :horizontal))]
+    (t/is (= {:x 10.0 :y 0.0} (:params (first result))))
+    (t/is (= {:c1x 8.0 :c1y 5.0 :c2x 2.0 :c2y 5.0 :x 0.0 :y 0.0}
+             (:params (second result))))))
+
+(t/deftest segment-flip-content-vertical
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :curve-to :params {:c1x 2.0 :c1y 5.0 :c2x 8.0 :c2y 5.0 :x 10.0 :y 0.0}}])
+        result  (vec (path/flip-content content #{0 1} :vertical))]
+    (t/is (= {:c1x 2.0 :c1y -5.0 :c2x 8.0 :c2y -5.0 :x 10.0 :y 0.0}
+             (:params (second result))))))
+
+(t/deftest segment-flip-content-partial-selection
+  ;; only the selected nodes and their handles move; others stay put
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}])
+        result  (path/flip-content content #{0 1} :horizontal)
+        pts     (mapv (comp (juxt :x :y) :params) (vec result))]
+    (t/is (= [[10.0 0.0] [0.0 0.0] [10.0 10.0]] pts))))
+
 (t/deftest helpers-fit-curve-single-curve
   ;; samples of one gentle cubic are fitted back with a single curve
   (let [curve   [(gpt/point 0.0 0.0) (gpt/point 30.0 0.0)
