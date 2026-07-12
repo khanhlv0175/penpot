@@ -518,21 +518,20 @@ Work planned on top of the polished editor, with required groundwork:
    with the two ends ~11 px apart; endpoint nodes and curve handlers covered by
    pure-fn tests. Limitation: a node whose following command is the `close-path` seam is
    not separable (its outgoing "segment" is the implicit closing line).
-- [ ] **Feature 14 — 15° angle constraint (was 45°).** Shift while drawing/moving snaps
-   the next point to fixed angles from the previous point. The buckets are in
-   `common/src/app/common/types/path/helpers.cljc` `closest-angle`, which currently snaps
-   to 45° increments (8 buckets) and feeds `position-fixed-angle` (used by draw preview
-   `preview-next-point`/`add-node`, shift node-drag, `drag-handler`, and
-   `move-handler-stream`). Change `closest-angle` to 15° increments (24 buckets: round to
-   the nearest multiple of 15) so all Shift-constrained path operations use the finer
-   angle. Trivial, but it changes every Shift constraint in the editor, not only the draw
-   preview — confirm that's intended (it matches "decrease it to 15 degrees").
+- [x] **Feature 14 — 15° angle constraint (was 45°).** Completed 2026-07-12.
+   `closest-angle` in `common/src/app/common/types/path/helpers.cljc` now snaps to the
+   nearest 15° via `(mth/round angle 15)` (was 8 fixed 45° buckets). This feeds
+   `position-fixed-angle`, so **every** Shift-constrained path operation uses the finer
+   angle: draw preview (`preview-next-point`/`add-node`), Shift node-drag, `drag-handler`,
+   and `move-handler-stream` (intended per the request). Verified live:
+   (10,6)@≈31°→30°, (10,2)@≈11°→15°, (3,10)@≈73°→75° — all on 15° increments (the old
+   code snapped 31° to 45°).
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Remaining roadmap items: 4, 9, and 14.
+Remaining roadmap items: 4 and 9.
 
 ## 7. Testing status
 

@@ -72,16 +72,9 @@
     nil))
 
 (defn- closest-angle
+  "Snaps an angle (in degrees) to the nearest 15° increment."
   [angle]
-  (cond
-    (or  (> angle 337.5)  (<= angle 22.5))  0
-    (and (> angle 22.5)   (<= angle 67.5))  45
-    (and (> angle 67.5)   (<= angle 112.5)) 90
-    (and (> angle 112.5)	(<= angle 157.5)) 135
-    (and (> angle 157.5)	(<= angle 202.5)) 180
-    (and (> angle 202.5)	(<= angle 247.5)) 225
-    (and (> angle 247.5)	(<= angle 292.5)) 270
-    (and (> angle 292.5)	(<= angle 337.5)) 315))
+  (mth/round angle 15))
 
 (defn position-fixed-angle
   [point from-point]

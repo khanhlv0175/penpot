@@ -853,15 +853,22 @@
   (t/testing "returns point unchanged when from-point is nil"
     (let [pt (gpt/point 5.0 3.0)]
       (t/is (= pt (path.helpers/position-fixed-angle pt nil)))))
-  (t/testing "snaps to nearest 45-degree angle"
-    (let [from (gpt/point 0 0)
-          ;; Angle ~30° from from, should snap to 45°
-          to   (gpt/point 10 6)
-          snapped (path.helpers/position-fixed-angle to from)]
-      ;; result should have same distance
-      (let [d-orig    (gpt/distance to from)
-            d-snapped (gpt/distance snapped from)]
-        (t/is (mth/close? d-orig d-snapped 0.01))))))
+  (t/testing "snaps to nearest 15-degree angle"
+    (let [from      (gpt/point 0 0)
+          ;; ~31° from `from`: snaps to 30° (15° granularity), not 45°
+          to        (gpt/point 10 6)
+          snapped   (path.helpers/position-fixed-angle to from)
+          d-orig    (gpt/distance to from)
+          d-snapped (gpt/distance snapped from)
+          snap-ang  (gpt/angle snapped from)
+          orig-ang  (gpt/angle to from)
+          delta     (let [d (mod (- snap-ang orig-ang) 360)] (min d (- 360 d)))]
+      ;; distance preserved
+      (t/is (mth/close? d-orig d-snapped 0.01))
+      ;; snapped onto a 15° multiple
+      (t/is (let [m (mod snap-ang 15)] (or (< m 0.01) (> m 14.99))))
+      ;; within half a 15° bucket of the original (a 45° snap would be >7.5° off)
+      (t/is (<= delta 7.5)))))
 
 (t/deftest helpers-command->line
   (let [prev {:command :move-to :params {:x 0.0 :y 0.0}}
