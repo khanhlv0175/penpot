@@ -215,6 +215,15 @@
   (let [content (impl/path-data content)]
     (segment/segment-entries content)))
 
+(defn single-line?
+  "True when the content is a single straight segment: a move-to
+  followed by exactly one line-to."
+  [content]
+  (and (some? content)
+       (= 2 (count content))
+       (= :move-to (:command (nth content 0)))
+       (= :line-to (:command (nth content 1)))))
+
 (defn close-loops
   "Marks every subpath whose endpoints coincide as command-closed: a
   trailing line-to landing on the subpath start is replaced by a

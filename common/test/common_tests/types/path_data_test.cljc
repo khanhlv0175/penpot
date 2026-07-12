@@ -1965,6 +1965,21 @@
     ;; The second subpath starts from its own move-to
     (t/is (= 4 (:from-index (nth entries 3))))))
 
+(t/deftest single-line-predicate
+  ;; A move-to followed by exactly one line-to is a single line
+  (t/is (path/single-line?
+         (path/content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                        {:command :line-to :params {:x 10.0 :y 10.0}}])))
+  ;; A curve, a polyline and a closed loop are not
+  (t/is (not (path/single-line?
+              (path/content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                             {:command :curve-to :params {:c1x 1.0 :c1y 0.0 :c2x 2.0 :c2y 0.0 :x 10.0 :y 0.0}}]))))
+  (t/is (not (path/single-line?
+              (path/content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                             {:command :line-to :params {:x 10.0 :y 0.0}}
+                             {:command :line-to :params {:x 20.0 :y 0.0}}]))))
+  (t/is (not (path/single-line? nil))))
+
 (t/deftest extract-content-chains-and-breaks
   (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
                  {:command :line-to :params {:x 10.0 :y 0.0}}

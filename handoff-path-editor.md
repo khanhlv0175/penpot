@@ -451,12 +451,76 @@ Work planned on top of the polished editor, with required groundwork:
    snapped primary delta. Existing opposite-handler angle matching is preserved for
    unselected opposites and suppressed between two selected opposites so neither can
    overwrite the other's movement.
-- [ ] **Feature 9 — improve single line selection and transformation.** Not directly
-   part of the path editor, but important when the pen tool is used to create a single
-   straight line: the resulting shape's selrect is degenerate (zero width or height for
-   axis-aligned lines), which makes selecting and transforming the shape in the normal
-   workspace awkward. Improve hit-testing/selection and the transform handles for
-   line-like paths outside the editor.
+- [x] **Feature 9 — improve single line selection and transformation.** Completed
+   2026-07-12. A single selected straight-line path (`path/single-line?`: content is a
+   `move-to` + one `line-to`) now shows path-editor-style controls instead of the
+   degenerate bounding-box resize/rotate handles: two endpoint handles (`line-handlers*`
+   in `viewport/selection.cljs`, rendered by `single-handlers*` when `line?`), and the
+   existing selection rect for a middle drag-to-move. Dragging an endpoint runs
+   `transforms/start-move-line-point` (re-exported as `dw/start-move-line-point`): the
+   grabbed endpoint follows the pointer while the opposite endpoint stays fixed —
+   snapping to nearby objects, or constrained to 15° increments around the fixed endpoint
+   while Shift is held (reuses `path.helpers/position-fixed-angle`). Preview is live
+   (throttled `update-shapes` with `:save-undo? false` on the real shape, no ephemeral
+   modifier); each frame rebuilds from the captured original content via
+   `path/apply-content-modifiers` + `path/update-geometry` (idempotent, WASM world-coord
+   content). The whole gesture collapses to **one** undo entry via preview-then-commit: on
+   release (`position-stream … rx/last`) it silently resets to the original geometry
+   (`:save-undo? false`) then commits the final position (`:save-undo? true`). The two
+   drag branches are combined with **`rx/merge`, not `rx/concat`** — with concat the
+   release branch only subscribes after the preview completes at the stopper, so `rx/last`
+   never fires and the endpoint never commits (bug caught + fixed 2026-07-12). An earlier
+   `dwu/start-/commit-undo-transaction` was dropped: the stream-driven undo watcher
+   (workspace.cljs) is async and races the commit, leaving several entries per drag.
+   **Rotation handles (added 2026-07-12):** `single-handlers*` for a line renders
+   `controls-handlers*` with a new `only-rotation?` flag (threaded into
+   `calculate-handlers`, which then returns just the four corner rotation handles) wrapped
+   in `[:g.line-controls]` next to `line-handlers*`; `line-handlers*` gained the same
+   `refs/current-transform` :move/:rotate gate as the other controls so endpoints hide
+   while the line rotates. Verified: node-0 and node-1 endpoint drags (opposite endpoint
+   fixed) with selrect recompute; middle drag translates both endpoints equally; Shift
+   snaps to exactly 0°/-15°; object snapping; rotation-handle drag 0°→30° (content rotated
+   about centre); exactly one undo entry per gesture that fully reverts. Rendering (4
+   rotation handles + 2 endpoint handles + 0 resize handles) and the rotation gesture were
+   confirmed live via DOM+screenshot; the endpoint-drag undo behaviour was confirmed by
+   store-driving (primed `ms/mouse-position` + `:interrupt` stopper) after the WASM canvas
+   render died mid-session from repeated hot reloads. Pure-fn test `single-line-predicate`.
+   Scope note: WASM-correct (content in world coords); rotated lines keep their transform
+   metadata (endpoint edit still works but the oriented bbox is not re-fitted). Only the
+   resize handles are replaced (rotation kept); marquee/normal selection is unchanged.
+   **Polish (2026-07-12, uncommitted):** a selected single line no longer shows the
+   bounding-rectangle outline or the `W × H` size badge. `selection.cljs`
+   `single-selection*` detects `path/single-line?` and passes `:hide-outline? true`
+   through `controls-selection*` to `selection-rect`, which then draws no stroke and sets
+   `pointer-events: all` so the whole selrect stays a draggable body-move target (feature
+   9's middle-drag preserved — this *widens* the grab area from the thin outline to the
+   full bbox for lines). `measurements.cljs` `selection-size-badge*` returns nil for a
+   single-line selection (added `cfh`/`path` requires). Endpoint + rotation handles are
+   untouched.
+   **WASM render fix (2026-07-12, uncommitted, `render-wasm/src/shapes.rs`):** a *rotated*
+   line vanished while being moved. During an interactive (modifier) drag the renderer
+   blits a cached snapshot of the shape clipped to `drag_crop_clip_path` (document space).
+   That clip double-applied the shape transform to the stroke region: `stroke_to_path`
+   already returns the region in document space (it undoes `path_transform` internally),
+   but the code then applied `shape_document_transform()` a second time. For a rotated
+   shape this pushed the stroke clip off the shape; a line has an empty fill clip (open
+   path), so the mis-placed stroke clip was the *only* clip → the blit was clipped to
+   nothing and the line disappeared. Non-rotated lines escaped (identity transform =
+   no-op; axis-aligned lines are also skipped from the cache via degenerate bounds at
+   `render.rs:1950`). Fix: drop the extra `make_transform(shape_document_transform())` on
+   the stroke region (fill stays local→doc via `get_skia_path` + `shape_document_transform`;
+   both end in document space, consistent). Also fixes stroke-clip placement for rotated
+   *closed* stroked paths during drag (previously masked by their non-empty fill clip).
+   Requires a `render-wasm/./build` + browser hard-refresh.
+   **Hide controls during endpoint drag (2026-07-12, uncommitted):**
+   `transforms/start-move-line-point` now sets `[:workspace-local :transform] :move` for
+   the duration of the drag (wrapping the merged preview+commit stream in `rx/concat`:
+   set `:move` → merge → clear to nil). Both `line-handlers*` and the `:only-rotation?`
+   `controls-handlers*` already hide when `refs/current-transform` is `:move`/`:rotate`,
+   so this suppresses the rotation handles (and their rotation cursor) while an endpoint is
+   being dragged. The `rx/concat` wraps the *whole* merge, so both drag branches still
+   subscribe together at drag start (the `rx/last` release branch keeps firing — the
+   earlier concat-splitting bug is not reintroduced).
 - [x] **Feature 10 — move segments without moving the nodes.** Completed 2026-07-12.
    A segment drag with the platform modifier held (`ms/mouse-position-mod`, ctrl on
    win/linux, meta on mac) bends the grabbed segment through the pointer while its
@@ -531,7 +595,7 @@ Work planned on top of the polished editor, with required groundwork:
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Remaining roadmap items: 4 and 9.
+Remaining roadmap item: 4.
 
 ## 7. Testing status
 

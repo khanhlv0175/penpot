@@ -1483,9 +1483,14 @@ impl Shape {
         };
 
         let path_transform = self.to_path_transform();
-        let apply_doc_transform = path_transform.is_some();
 
         for stroke in self.visible_strokes() {
+            // `stroke_to_path` receives the raw (document-space) shape path and
+            // undoes `path_transform` internally, so its result is already in
+            // document space. Applying `shape_document_transform` again would
+            // double-apply the rotation and push the stroke clip off a rotated
+            // shape — for a fill-less shape (a line) the fill clip is empty, so
+            // the mis-placed stroke clip erased the shape entirely mid-drag.
             let Some(stroke_region) = stroke_to_path(
                 stroke,
                 &shape_path,
@@ -1496,10 +1501,7 @@ impl Shape {
             ) else {
                 continue;
             };
-            let mut sk = stroke_region.to_skia_path(self.svg_attrs.as_ref());
-            if apply_doc_transform {
-                sk = sk.make_transform(&self.shape_document_transform());
-            }
+            let sk = stroke_region.to_skia_path(self.svg_attrs.as_ref());
             acc = acc.op(&sk, skia::PathOp::Union).unwrap_or(acc);
         }
 

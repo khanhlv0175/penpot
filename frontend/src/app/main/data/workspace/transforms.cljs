@@ -23,6 +23,8 @@
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.modifiers :as ctm]
+   [app.common.types.path :as path]
+   [app.common.types.path.helpers :as path.helpers]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.attrs :refer [editable-attrs]]
    [app.common.types.shape.layout :as ctl]
@@ -363,6 +365,82 @@
                    (rx/of
                     (dwm/apply-modifiers)
                     (finish-transform))))))))))))
+
+(defn start-move-line-point
+  "Interactive drag of a single endpoint of a straight-line path shape.
+  The endpoint at the given content command index follows the pointer
+  (snapping to nearby objects, or constrained to 15° increments around the
+  opposite endpoint while shift is held) while the rest of the shape stays
+  fixed. Commits a single undo entry."
+  [shape index]
+  (ptk/reify ::start-move-line-point
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [id          (dm/get-prop shape :id)
+            page-id     (:current-page-id state)
+            objects     (dsh/lookup-page-objects state page-id)
+            zoom        (dm/get-in state [:workspace-local :zoom] 1)
+            layout      (:workspace-layout state)
+            focus       (:workspace-focus-selected state)
+
+            content     (dm/get-prop shape :content)
+            start-point (path.helpers/segment->point (nth content index))
+            other-point (path.helpers/segment->point (nth content (if (zero? index) 1 0)))
+
+            stopper     (mse/drag-stopper stream)
+
+            ;; Endpoint position: constrained to fixed angles around the
+            ;; opposite endpoint while shift is held, otherwise snapped to
+            ;; nearby objects.
+            position-stream
+            (->> ms/mouse-position
+                 (rx/filter some?)
+                 (rx/with-latest-from ms/mouse-position-shift)
+                 (rx/switch-map
+                  (fn [[pos shift?]]
+                    (if ^boolean shift?
+                      (rx/of (path.helpers/position-fixed-angle pos other-point))
+                      (snap/closest-snap-point page-id [shape] objects layout zoom focus pos))))
+                 (rx/share))
+
+            move-endpoint
+            (fn [pos save-undo?]
+              (let [delta (gpt/to-vec start-point pos)]
+                (dwsh/update-shapes
+                 [id]
+                 (fn [_]
+                   (-> shape
+                       (assoc :content (path/apply-content-modifiers
+                                        content
+                                        {index {:x (dm/get-prop delta :x)
+                                                :y (dm/get-prop delta :y)}}))
+                       (path/update-geometry)))
+                 {:reg-objects? true :save-undo? save-undo?})))]
+
+        ;; Mark a transform in progress for the duration of the drag so the
+        ;; selection controls (endpoint + rotation handles) hide — otherwise the
+        ;; rotation handles stay live and show the rotation cursor mid-drag.
+        (rx/concat
+         (rx/of #(assoc-in % [:workspace-local :transform] :move))
+         ;; Both branches subscribe at drag start (merge, not concat) so the
+         ;; release branch can capture the final pointer position.
+         (rx/merge
+          ;; Live preview without undo churn (the stream-driven undo watcher is
+          ;; async, so per-frame undo entries can't be collapsed reliably).
+          (->> position-stream
+               (rx/sample mconst/move-sample-time)
+               (rx/map #(move-endpoint % false))
+               (rx/take-until stopper))
+          ;; On release, collapse the whole gesture into one undo entry: silently
+          ;; reset to the original geometry, then commit the final position.
+          (->> position-stream
+               (rx/take-until stopper)
+               (rx/last)
+               (rx/mapcat
+                (fn [pos]
+                  (rx/of (move-endpoint start-point false)
+                         (move-endpoint pos true))))))
+         (rx/of #(assoc-in % [:workspace-local :transform] nil)))))))
 
 (defn trigger-bounding-box-cloaking
   "Trigger the bounding box cloaking (with default timer of 1sec)
