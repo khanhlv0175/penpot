@@ -349,12 +349,22 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   `…L389,214Z`; a multi-subpath icon closes each of its 3 coincident loops
   independently, preserving a `curve-to` ending before its `Z`; genuinely open paths are
   left unchanged.
-- [ ] **Bug 13 — make-curve can curve adjacent nodes.** Converting a node to a curve
-  (make-curve) sometimes also curves the neighbouring node(s); only the targeted node(s)
-  should ever change. Suspect the position-based collapse at the common-fn boundary
-  (handler grouping / duplicate-coordinate ambiguity noted in the branch review, §12) or a
-  mis-scoped handler write in `process-path-tool` make-curve. It must never affect adjacent
-  nodes.
+- [x] **Bug 13 — make-curve can curve adjacent nodes.** Fixed 2026-07-13. Root cause was in
+  `common.types.path.segment/make-curve-point`: its normal branch (a node with two distinct
+  neighbours, `count = 2`) correctly gives only the target node handles and keeps each
+  neighbour's shared-segment handle coincident (a corner), but the **fallback else branch**
+  (`count ≠ 2` — chiefly an **endpoint**) converted the adjacent segment(s) with
+  `line->curve`, which offsets the handles at **both** endpoints — so the neighbour got a
+  real handle and appeared curved. Reproduced: curving the first node of `M0,0 L100,0 L200,0`
+  produced `c2=(68.4,10.5)` on the shared segment (neighbour `(100,0)` curved). Fix: the
+  else branch now mirrors the `count = 2` branch — for each segment adjacent to the target it
+  writes only the target's handle (`update-curve-to` with the neighbour coincident for a
+  `line-to`, or `update-handler` on just the target's `:c1`/`:c2` for a `curve-to`), placing
+  the target handle 1/3 of the way toward the neighbour. The now-unused `line->curve` helper
+  was removed. Verified (JVM + REPL): endpoint/last-node/middle all keep neighbours coincident
+  (e.g. endpoint → `c1=(33.3,0)`, `c2=(100,0)` coincident). New test
+  `segment-make-curve-point-keeps-neighbors-corners`; full common suite 1100 tests / 24570
+  assertions, 0 failures; `cljfmt`/`clj-kondo` clean.
 
 ## 6. Refactors and features checklist
 
@@ -695,7 +705,6 @@ and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 
 - [ ] **Open features** (see §6 entries above): 4 (round corners), 18 (default path stroke
   to center), 19 (Alt toggles handler join both ways), 20 (move handlers while drawing).
-- [ ] **Bug 13 — make-curve can curve adjacent nodes** (see §5).
 - [ ] **Refactor — unify edition stop signals and make deferred ordering explicit**
   (see §6 entry above).
 - [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences

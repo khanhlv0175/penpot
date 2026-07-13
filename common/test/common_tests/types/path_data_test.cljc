@@ -844,6 +844,38 @@
     (t/is (= 3.0 (get-in cmd [:params :c1x])))
     (t/is (= 7.0 (get-in cmd [:params :c2x])))))
 
+(t/deftest segment-make-curve-point-keeps-neighbors-corners
+  ;; Bug 13: making a node a curve must never curve its neighbours; the
+  ;; neighbour's handle on the shared segment stays coincident with it.
+  (let [content [{:command :move-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 100.0 :y 0.0}}
+                 {:command :line-to :params {:x 200.0 :y 0.0}}]]
+
+    (t/testing "curving the first (endpoint) node keeps its neighbour a corner"
+      (let [r    (vec (seq (path/make-curve-point content (gpt/point 0.0 0.0))))
+            seg1 (get r 1)]
+        (t/is (= :curve-to (:command seg1)))
+        ;; neighbour (100,0): its :c2 stays coincident (a corner)
+        (t/is (= 100.0 (get-in seg1 [:params :c2x])))
+        (t/is (= 0.0 (get-in seg1 [:params :c2y])))
+        ;; the curved node (0,0) actually got a handle
+        (t/is (not= 0.0 (get-in seg1 [:params :c1x])))))
+
+    (t/testing "curving the last node keeps its neighbour a corner"
+      (let [r    (vec (seq (path/make-curve-point content (gpt/point 200.0 0.0))))
+            seg2 (get r 2)]
+        (t/is (= :curve-to (:command seg2)))
+        ;; neighbour (100,0): its :c1 stays coincident (a corner)
+        (t/is (= 100.0 (get-in seg2 [:params :c1x])))
+        (t/is (= 0.0 (get-in seg2 [:params :c1y])))))
+
+    (t/testing "curving a middle node keeps both neighbours corners"
+      (let [r    (vec (seq (path/make-curve-point content (gpt/point 100.0 0.0))))
+            seg1 (get r 1)
+            seg2 (get r 2)]
+        (t/is (= 0.0 (get-in seg1 [:params :c1x])))
+        (t/is (= 200.0 (get-in seg2 [:params :c2x])))))))
+
 (t/deftest helpers-prefix->coords
   (t/is (= [:c1x :c1y] (path.helpers/prefix->coords :c1)))
   (t/is (= [:c2x :c2y] (path.helpers/prefix->coords :c2)))

@@ -398,34 +398,6 @@
 
     (impl/from-plain content)))
 
-(defn- line->curve
-  [from-p segment]
-
-  (let [to-p (helpers/segment->point segment)
-
-        v (gpt/to-vec from-p to-p)
-        d (gpt/distance from-p to-p)
-
-        dv1 (-> (gpt/normal-left v)
-                (gpt/scale (/ d 3)))
-
-        h1 (gpt/add from-p dv1)
-
-        dv2 (-> (gpt/to-vec to-p h1)
-                (gpt/unit)
-                (gpt/scale (/ d 3)))
-
-        h2 (gpt/add to-p dv2)]
-    (-> segment
-        (assoc :command :curve-to)
-        (update :params (fn [params]
-                          ;; ensure plain map
-                          (-> (into {} params)
-                              (assoc :c1x (:x h1))
-                              (assoc :c1y (:y h1))
-                              (assoc :c2x (:x h2))
-                              (assoc :c2y (:y h2))))))))
-
 ;; FIXME: optimize
 (defn is-curve?
   [content point]
@@ -529,20 +501,30 @@
 
         (reduce add-curve content vectors))
 
-      (let [add-curve
-            (fn [content {:keys [index segment prev-p next-c next-i]}]
+      (let [;; Handle at `point` pointing 1/3 of the way toward `other`.
+            point-handle
+            (fn [other]
+              (gpt/add point (gpt/scale (gpt/to-vec point other) (/ 1 3))))
+
+            add-curve
+            (fn [content {:keys [index segment prev-p next-c next-i next-p]}]
               (cond-> content
-                (= :line-to (:command segment))
-                (update index #(line->curve prev-p %))
+                ;; Incoming segment ends at `point`: only `point` (its :c2)
+                ;; gets a handle; the previous node's handle stays coincident
+                ;; with it so that node remains a corner.
+                (and (= :line-to (:command segment)) (some? prev-p))
+                (update index helpers/update-curve-to prev-p (point-handle prev-p))
 
-                (= :curve-to (:command segment))
-                (update index #(line->curve prev-p %))
+                (and (= :curve-to (:command segment)) (some? prev-p))
+                (update index update-handler :c2 (point-handle prev-p))
 
-                (= :line-to (:command next-c))
-                (update next-i #(line->curve point %))
+                ;; Outgoing segment starts at `point`: only `point` (its :c1)
+                ;; gets a handle; the next node stays a corner.
+                (and (= :line-to (:command next-c)) (some? next-p))
+                (update next-i helpers/update-curve-to (point-handle next-p) next-p)
 
-                (= :curve-to (:command next-c))
-                (update next-i #(line->curve point %))))]
+                (and (= :curve-to (:command next-c)) (some? next-p))
+                (update next-i update-handler :c1 (point-handle next-p))))]
         (reduce add-curve content vectors)))))
 
 (defn get-segments-with-points
