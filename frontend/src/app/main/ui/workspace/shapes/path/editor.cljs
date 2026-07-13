@@ -15,7 +15,9 @@
    [app.main.data.workspace.path.helpers :as dwp.helpers]
    [app.main.snap :as snap]
    [app.main.store :as st]
+   [app.main.streams :as ms]
    [app.main.ui.css-cursors :as cur]
+   [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [goog.events :as events]
@@ -41,7 +43,7 @@
 
 (mf/defc path-point*
   {::mf/private true}
-  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-start-path is-last is-curve]}]
+  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-start-path is-last is-new is-curve]}]
   (let [{:keys [x y]} position
 
         is-draw (= edit-mode :draw)
@@ -70,27 +72,32 @@
           (when (dom/left-mouse? event)
             (dom/stop-propagation event)
             (dom/prevent-default event)
-            (let [is-shift (kbd/shift? event)
-                  is-mod   (kbd/mod? event)]
-              (cond
-                is-last
-                (st/emit! (drp/reset-last-handler))
+            ;; A preview node on a segment carries the split params in its
+            ;; metadata; clicking it only inserts the node.
+            ;; FIXME: revisit this, using meta here breaks equality checks
+            (if (and is-new (some? (meta position)))
+              (st/emit! (drp/create-node-at-position (meta position)))
+              (let [is-shift (kbd/shift? event)
+                    is-mod   (kbd/mod? event)]
+                (cond
+                  is-last
+                  (st/emit! (drp/reset-last-handler))
 
-                (and is-move is-mod (not is-curve))
-                (st/emit! (drp/make-curve position))
+                  (and is-move is-mod (not is-curve))
+                  (st/emit! (drp/make-curve position))
 
-                (and is-move is-mod is-curve)
-                (st/emit! (drp/make-corner position))
+                  (and is-move is-mod is-curve)
+                  (st/emit! (drp/make-corner position))
 
-                is-move
-                ;; If we're dragging a selected item we don't change the selection
-                (st/emit! (drp/start-move-path-point index is-shift))
+                  is-move
+                  ;; If we're dragging a selected item we don't change the selection
+                  (st/emit! (drp/start-move-path-point index is-shift))
 
-                (and is-draw is-start-path)
-                (st/emit! (drp/start-path-from-point position))
+                  (and is-draw is-start-path)
+                  (st/emit! (drp/start-path-from-point position))
 
-                (and is-draw (not is-start-path))
-                (st/emit! (drp/close-path-drag-start position))))))]
+                  (and is-draw (not is-start-path))
+                  (st/emit! (drp/close-path-drag-start position)))))))]
 
     [:g.path-point
      [:circle.path-point
@@ -111,7 +118,12 @@
                :on-pointer-down on-pointer-down
                :on-pointer-enter on-enter
                :on-pointer-leave on-leave
-               :pointer-events (when-not ^boolean is-preview "visible")
+               ;; The insertion preview node is a non-interactive hint (an
+               ;; explicit "visible" would override the parent group's "none");
+               ;; the click is handled by the segment below it.
+               :pointer-events (cond ^boolean is-preview nil
+                                     ^boolean is-new "none"
+                                     :else "visible")
                :class (cond ^boolean is-draw (cur/get-static "pen-node")
                             ^boolean is-move (cur/get-static "pointer-node"))
                :style {:stroke-width 0
@@ -206,10 +218,9 @@
 
 (mf/defc path-segment*
   {::mf/private true}
-  [{:keys [entry zoom edit-mode is-selected is-hover]}]
+  [{:keys [entry zoom is-interactive is-selected is-hover]}]
   (let [index    (:index entry)
         content  (mf/with-memo [entry] (segment-content entry))
-        is-move  (= edit-mode :move)
         is-active (or ^boolean is-selected ^boolean is-hover)
         on-enter (mf/use-fn
                   (mf/deps index)
@@ -221,13 +232,13 @@
                     (st/emit! (drp/path-segment-leave index))))
         on-pointer-down
         (mf/use-fn
-         (mf/deps index is-move)
+         (mf/deps index is-interactive)
          (fn [event]
-           (when (and ^boolean is-move (dom/left-mouse? event))
+           (when (and ^boolean is-interactive (dom/left-mouse? event))
              (dom/stop-propagation event)
              (dom/prevent-default event)
              (st/emit! (drp/start-move-path-segment index (kbd/shift? event))))))]
-    [:g.path-segment {:pointer-events (if ^boolean is-move "visible" "none")}
+    [:g.path-segment {:pointer-events (if ^boolean is-interactive "visible" "none")}
      (when ^boolean is-active
        [:path {:d (.toString content)
                :pointer-events "none"
@@ -322,8 +333,24 @@
                 moving-nodes
                 moving-handler
                 hover
-                snap-toggled]}
+                snap-toggled
+                add-nodes]}
         state
+
+        ;; In move mode, hovering a segment always previews the node that a
+        ;; click would insert (feature 16); the preview + click-to-insert work
+        ;; regardless of the add-nodes toggle.
+        move-mode?
+        (= edit-mode :move)
+
+        ;; The add-nodes toggle (a sub-state of move mode): while active, segment
+        ;; select/drag is suppressed and the preview node itself is the click
+        ;; target, so the whole path becomes a pure node-insertion surface.
+        adding-nodes?
+        (and ^boolean move-mode? ^boolean add-nodes)
+
+        hover-point
+        (mf/use-state nil)
 
         selected-nodes    (get selection :nodes #{})
         selected-segments (get selection :segments #{})
@@ -386,6 +413,21 @@
                                   (st/emit! :interrupt)))]
         #(events/unlistenByKey key)))
 
+    ;; In move mode, preview the node that a click would insert: only near a
+    ;; segment's exact middle by default, or anywhere on the path while the
+    ;; add-nodes toggle is on. When a click there would only select, no preview.
+    (hooks/use-stream
+     ms/mouse-position
+     (mf/deps base-content zoom move-mode? adding-nodes?)
+     (fn [position]
+       (if ^boolean move-mode?
+         (reset! hover-point
+                 (dwp.helpers/insertion-point
+                  base-content position
+                  (/ dwp.helpers/segment-insert-threshold zoom)
+                  adding-nodes?))
+         (reset! hover-point nil))))
+
     [:g.path-editor {:ref editor-ref}
      [:path {:d (.toString content)
              :style {:fill "none"
@@ -396,13 +438,24 @@
         {:key (dm/str "segment-" index)
          :entry entry
          :zoom zoom
-         :edit-mode edit-mode
+         :is-interactive ^boolean move-mode?
          :is-selected (contains? selected-segments index)
          :is-hover (contains? hover-segments index)}])
      (when (and preview (not drag-handler))
        [:> path-preview* {:segment preview
                           :from last-p
                           :zoom zoom}])
+
+     ;; Purely visual hint of the node a click would insert; the click itself is
+     ;; handled by the segment below (pointer-events none here, on both the group
+     ;; and the node's hit circle, so the click reaches the segment).
+     (when (and ^boolean move-mode? (some? @hover-point))
+       [:g.hover-point {:pointer-events "none"}
+        [:> path-point* {:position @hover-point
+                         :edit-mode edit-mode
+                         :is-new true
+                         :is-start-path is-path-start
+                         :zoom zoom}]])
 
      (when (and drag-handler last-p)
        [:g.drag-handler {:pointer-events "none"}

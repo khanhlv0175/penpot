@@ -637,20 +637,38 @@ Work planned on top of the polished editor, with required groundwork:
    `clj-kondo` 0/0, main build `:ok`; REPL-verified the ref returns hidden for
    creation/editing and respects the preference for a rect draw / idle.
 
-- [ ] **Feature 16 — insert a node by clicking a segment (recover the insertion preview).**
-   Clicking the middle of a segment should split it and create a node at the click point,
-   with a live preview of the node to be added while the pointer hovers the segment. This
-   was disabled temporarily for feature 1 (segment selection): `create-node-at-position`
-   still exists with split params in the point metadata (§2), but the editor no longer
-   renders the insertion preview or invokes it, and segment clicks currently select the
-   segment instead. Re-enable the preview + click-to-insert and reconcile it with segment
-   selection (likely gated behind feature 17's "add node" mode).
-- [ ] **Feature 17 — "add node" mode (shortcut `p`, toolbar toggle).** A dedicated editor
-   mode that recovers the full add-node-while-hovering behaviour (feature 16's preview +
-   click-to-insert). Toggled on by pressing `p` or by a new toolbar icon in the path
-   edition bar (`path_actions.cljs`), and off again by Escape or the same menu toggle.
-   Model it on the existing `:draw`/`:move` edit modes (`:edit-mode` in the ephemeral edit
-   state) and the `toggle-snap` toolbar pattern.
+- [x] **Feature 16 — insert a node by clicking a segment's middle (with hover preview).**
+   Completed 2026-07-13, spec settled same day. Behaviour (the user's exact requirement):
+   a plain click on a segment **selects** it (feature 1 unchanged), **except** near the
+   segment's exact **middle** (t=0.5), where it **inserts** a node instead; the preview
+   appears **only** when a click would insert (i.e. near the middle) — **no Shift needed**.
+   Shared helpers in `data/workspace/path/helpers.cljs`: `segment-mid-point` (via
+   `path.helpers/curve-values` at t=0.5, lines→degenerate cubic) and `insertion-point`
+   (content → the nearest segment-middle within `segment-insert-threshold` (12 px / zoom),
+   carrying `{:from-p :to-p :t 0.5}` split meta, or nil; close-path segments excluded).
+   `editor.cljs` `use-stream` renders the dashed preview at `insertion-point` (so it only
+   shows near a middle). Insertion runs through the segment's own pointer-down
+   (`edition/start-move-path-segment`): the drag-stream **click** branch uses the same
+   `insertion-point` — non-nil → `create-node-at-position (meta)` → `split-segments`, else
+   `select-segment`; a **drag** still translates/bends (features 1/10). The preview node is
+   always non-interactive: `.hover-point` group pointer-events none AND the `is-new` hit
+   circle pointer-events none (an explicit "visible" on the child would override the group),
+   so the click reaches the segment. Verified live: preview absent at ¼ point, present at
+   the exact middle (150,2950); off-middle click selected the segment; middle click inserted
+   at exactly the middle (`M-50 L350` → `M-50 L150 L350`); no Shift used.
+- [x] **Feature 17 — "add node" toggle (shortcut `n`, toolbar toggle).** Completed
+   2026-07-13. A toggle *state of Move mode* (`:add-nodes` flag; `tools/toggle-add-nodes` +
+   `tools/set-add-nodes`, init false in `start-path-edit`). It relaxes feature 16 from
+   middle-only to **insert anywhere**: while ON, `insertion-point` is called with
+   `anywhere?` true (closest point on the path within threshold, via `path/closest-point`),
+   so the preview follows the cursor and a click inserts anywhere on a segment (never
+   selects); OFF is the middle-only behaviour above. Both use the same
+   `insertion-point`/`start-move-path-segment` path; drag still bends/translates in both.
+   Toolbar toggle button (`path_actions.cljs`, is-toggled, disabled outside move mode;
+   placeholder `pentool` icon — no dedicated glyph yet). Shortcut **`n`** (`p` stays Draw).
+   `esc-pressed` first branch: while ON, Escape only turns it off and keeps the editor open.
+   i18n `workspace.path.actions.add-nodes` in `en.po` (dev bundle shows the raw key until
+   translations recompiled). `cljfmt` clean, `clj-kondo` 0/0, main build `:ok`.
 - [ ] **Feature 18 — default path stroke alignment to center.** New paths should be created
    with a centered stroke; every other shape type keeps the current inside (`:inner`)
    default. Scope the changed default to path creation only.
@@ -663,6 +681,10 @@ Work planned on top of the polished editor, with required groundwork:
 - [ ] **Feature 20 — move handlers while drawing/creating a path.** During draw mode (not
    only move mode) the user should be able to grab and drag the Bézier handlers of
    already-placed nodes.
+- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
+   Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
+   single canonical stop path, and document or replace the load-bearing
+   `rx/observe-on :async` / `rx/delay 0` boundaries (see §3). Not started.
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
@@ -671,15 +693,11 @@ and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 
 **Remaining work:**
 
-- [ ] **Open features** (see §6 entries above): 4 (round corners), 16 (insert node on
-  segment click + recover insertion preview), 17 ("add node" mode: `p` / toolbar / Escape),
-  18 (default path stroke to center), 19 (Alt toggles handler join both ways), 20 (move
-  handlers while drawing).
+- [ ] **Open features** (see §6 entries above): 4 (round corners), 18 (default path stroke
+  to center), 19 (Alt toggles handler join both ways), 20 (move handlers while drawing).
 - [ ] **Bug 13 — make-curve can curve adjacent nodes** (see §5).
-- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
-  Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
-  single canonical stop path, and document or replace the load-bearing
-  `rx/observe-on :async` / `rx/delay 0` boundaries (see §3). Not started.
+- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit**
+  (see §6 entry above).
 - [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences
   for node drag, handler drag, arrows, tool ops, path-local undo/redo, Esc, double-click,
   and draw↔move switching, plus a by-hand devenv pass over the full workflow (pen draw,

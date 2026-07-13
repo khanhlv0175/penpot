@@ -109,3 +109,20 @@
     (update [_ state]
       (let [id (st/get-path-id state)]
         (update-in state [:workspace-local :edit-path id :snap-toggled] not)))))
+
+(defn set-add-nodes
+  "Enables/disables the add-nodes state (a sub-state of move mode: while active,
+  hovering a segment previews a node and clicking inserts it)."
+  [enabled?]
+  (ptk/reify ::set-add-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (assoc-in state [:workspace-local :edit-path id :add-nodes] enabled?)))))
+
+(defn toggle-add-nodes []
+  (ptk/reify ::toggle-add-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (update-in state [:workspace-local :edit-path id :add-nodes] not)))))

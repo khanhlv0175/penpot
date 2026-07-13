@@ -247,6 +247,7 @@
 (declare drag-selected-segments)
 (declare start-segment-drag)
 (declare bend-selected-segment)
+(declare create-node-at-position)
 
 (defn start-move-path-segment
   [index shift?]
@@ -254,15 +255,31 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [id                (dm/get-in state [:workspace-local :edition])
+            zoom              (dm/get-in state [:workspace-local :zoom] 1)
+            add-nodes?        (dm/get-in state [:workspace-local :edit-path id :add-nodes])
+            content           (st/get-path state :content)
             selected-segments (dm/get-in state
                                          [:workspace-local :edit-path id :selection :segments]
                                          #{})
-            selected?         (contains? selected-segments index)]
+            selected?         (contains? selected-segments index)
+
+            ;; A plain click selects the segment, except near its exact middle
+            ;; where it inserts a node instead (feature 16); with the add-nodes
+            ;; toggle a click anywhere on the path inserts. A drag still
+            ;; bends/translates the segment (handled by the drag branch).
+            insert-point      (helpers/insertion-point
+                               content @ms/mouse-position
+                               (/ helpers/segment-insert-threshold zoom)
+                               add-nodes?)
+
+            click-event       (if (some? insert-point)
+                                (create-node-at-position (meta insert-point))
+                                (selection/select-segment index shift?))]
         (streams/drag-stream
          (rx/of
           (when-not selected? (selection/select-segment index shift?))
           (start-segment-drag index @ms/mouse-position))
-         (rx/of (selection/select-segment index shift?)))))))
+         (rx/of click-event))))))
 
 (defn- segment-entry
   [content index]
@@ -511,7 +528,8 @@
                                        {:edit-mode :move
                                         :selection helpers/empty-selection
                                         :hover helpers/empty-selection
-                                        :snap-toggled false})]
+                                        :snap-toggled false
+                                        :add-nodes false})]
                            (assoc state :old-content (:content shape))))))))
 
     ptk/WatchEvent

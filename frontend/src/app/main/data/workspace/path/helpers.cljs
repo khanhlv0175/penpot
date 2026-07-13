@@ -154,6 +154,46 @@
                 (remove nil?))
           (segment-entries content))))
 
+(def segment-insert-threshold
+  "Distance (board px, divided by zoom at the call site) from a segment's exact
+  middle within which a plain click inserts a node instead of selecting."
+  12)
+
+(defn- segment-base-curve
+  "The `[start end h1 h2]` cubic of a segment entry (a line is the degenerate
+  cubic with both handles at the endpoints)."
+  [{:keys [from to segment]}]
+  (if (= :curve-to (:command segment))
+    [from to (path/get-handler segment :c1) (path/get-handler segment :c2)]
+    [from to from to]))
+
+(defn segment-mid-point
+  "Position at the parametric middle (t=0.5) of a segment entry."
+  [entry]
+  (path.helpers/curve-values (segment-base-curve entry) 0.5))
+
+(defn insertion-point
+  "The point that a click near `position` would insert into `content`, carrying
+  `{:from-p :to-p :t}` split metadata, or nil when a click there would not
+  insert. By default only a segment's exact middle (t=0.5) within `threshold`
+  qualifies; with `anywhere?` the closest point on the path within `threshold`
+  qualifies instead. Close-path segments never insert."
+  [content position threshold anywhere?]
+  (if anywhere?
+    (let [point (path/closest-point content position 0.01)]
+      (when (and (some? point) (<= (gpt/distance position point) threshold))
+        point))
+    (let [candidates
+          (->> (segment-entries content)
+               (remove #(= :close-path (:command (:segment %))))
+               (keep (fn [{:keys [from to] :as entry}]
+                       (let [mid  (segment-mid-point entry)
+                             dist (gpt/distance position mid)]
+                         (when (<= dist threshold)
+                           [dist (with-meta mid {:from-p from :to-p to :t 0.5})])))))]
+      (when (seq candidates)
+        (second (apply min-key first candidates))))))
+
 (defn- segment-lines
   [{:keys [from to segment]}]
   (if (= :curve-to (:command segment))

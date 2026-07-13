@@ -46,6 +46,10 @@
 (def ^:private snap-nodes-icon
   (deprecated-icon/icon-xref :snap-nodes (stl/css :snap-nodes-icon :pathbar-icon)))
 
+;; NOTE: placeholder icon; there is no dedicated add-nodes glyph yet.
+(def ^:private add-nodes-icon
+  (deprecated-icon/icon-xref :pentool (stl/css :pentool-icon :pathbar-icon)))
+
 (defn check-enabled [content selected-points]
   (when content
     (let [segments (path.segm/get-segments-with-points content selected-points)
@@ -71,7 +75,9 @@
 
 (mf/defc path-actions*
   [{:keys [shape state]}]
-  (let [{:keys [edit-mode selection snap-toggled]} state
+  (let [{:keys [edit-mode selection snap-toggled add-nodes]} state
+
+        is-move? (= edit-mode :move)
 
         content (:content shape)
 
@@ -144,7 +150,14 @@
         on-toggle-snap
         (mf/use-fn
          (fn [_]
-           (st/emit! (drp/toggle-snap))))]
+           (st/emit! (drp/toggle-snap))))
+
+        on-toggle-add-nodes
+        (mf/use-fn
+         (mf/deps is-move?)
+         (fn [_]
+           (when is-move?
+             (st/emit! (drp/toggle-add-nodes)))))]
 
     [:div {:class (stl/css :sub-actions)
            :data-dont-clear-path true}
@@ -216,6 +229,14 @@
                 :on-click on-make-curve}
        to-curve-icon]]
      [:div {:class (stl/css :sub-actions-group)}
+      ;; Toggle add-nodes (interactive insert on segment hover; move mode only)
+      [:button {:disabled (not is-move?)
+                :class  (stl/css-case :is-toggled (boolean add-nodes)
+                                      :topbar-btn true)
+                :title (tr "workspace.path.actions.add-nodes" (sc/get-tooltip :add-nodes))
+                :on-click on-toggle-add-nodes}
+       add-nodes-icon]
+
       ;; Toggle snap
       [:button {:class  (stl/css-case :is-toggled snap-toggled
                                       :topbar-btn true)

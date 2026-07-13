@@ -27,10 +27,16 @@
     (watch [_ state _]
       ;; While drawing a segment, escape only cancels it and keeps the
       ;; editor in draw mode; without one it exits the edition.
-      (let [id       (drp.state/get-path-id state)
-            pending? (some? (get-in state [:workspace-local :edit-path id :last-point]))
-            edition  (get-in state [:workspace-local :edition])]
+      (let [id        (drp.state/get-path-id state)
+            pending?  (some? (get-in state [:workspace-local :edit-path id :last-point]))
+            add-nodes? (get-in state [:workspace-local :edit-path id :add-nodes])
+            edition   (get-in state [:workspace-local :edition])]
         (cond
+          ;; While the add-nodes state is active, escape only turns it off and
+          ;; keeps the editor open.
+          add-nodes?
+          (rx/of (drp/set-add-nodes false))
+
           ;; A path still being created: finishing it creates the shape
           ;; and continues its edition in draw mode
           (and pending? (nil? edition))
@@ -57,6 +63,11 @@
                      :command "shift++"
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/add-node))}
+
+   :add-nodes       {:tooltip "N"
+                     :command "n"
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/toggle-add-nodes))}
 
    :delete-node     {:tooltip (ds/supr)
                      :command ["del" "backspace"]
