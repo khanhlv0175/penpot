@@ -294,6 +294,43 @@
     (t/is (= (gpt/point 11 4) (path/get-handler-point content' 1 :c2)))
     (t/is (= (gpt/point 15 4) (path/get-handler-point content' 2 :c1)))))
 
+(t/deftest arrow-move-nudges-selected-handlers
+  ;; an arrow key nudges a selected handler on its own (set-move-modifier is the
+  ;; per-step accumulator move-selected drives for handler selections)
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{} :handlers #{[2 :c1]}})
+        state'   (ptk/update (path.edition/set-move-modifier [] #{[2 :c1]} (gpt/point 0 5))
+                             state)
+        mods     (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content' (path/apply-content-modifiers content mods)]
+    (t/is (= {:c1x 0 :c1y 5} (get mods 2)))
+    ;; [2 :c1] base (12,0) -> (12,5); node 1 and its opposite handle stay put
+    (t/is (= (gpt/point 12 5) (path/get-handler-point content' 2 :c1)))
+    (t/is (= (gpt/point 10 0) (path.helpers/node-position content' 1)))
+    (t/is (= (gpt/point 8 0) (path/get-handler-point content' 1 :c2)))))
+
+(t/deftest arrow-move-nudges-selected-segment-endpoints
+  ;; an arrow key nudges a selected segment by moving its endpoint nodes (with
+  ;; their handlers), resolved the way move-selected does for segment selections
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{1} :handlers #{}})
+        node-idx (path.helpers/segment-node-indices content #{1})
+        points   (path.helpers/node-positions content node-idx)
+        state'   (ptk/update (path.edition/set-move-modifier points #{} (gpt/point 0 5))
+                             state)
+        mods     (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content' (path/apply-content-modifiers content mods)]
+    ;; segment 1 connects node 0 (0,0) and node 1 (10,0); both move by (0,5)
+    (t/is (= (gpt/point 0 5) (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 10 5) (path.helpers/node-position content' 1)))
+    ;; the endpoint nodes' handles move rigidly with them
+    (t/is (= (gpt/point 2 5) (path/get-handler-point content' 1 :c1)))
+    (t/is (= (gpt/point 12 5) (path/get-handler-point content' 2 :c1)))))
+
 (defn- run-handle-drawing-end
   "Drives the handle-drawing continuation with an ::end-edition carrying
   the given :restart? flag and calls back with the drawing-end emissions."
@@ -702,3 +739,40 @@
     (t/is (some? (get-in idle [:workspace-local :edit-path id :preview])))
     ;; a placed handler is being dragged mid-draw: the preview must not move
     (t/is (nil? (get-in during [:workspace-local :edit-path id :preview])))))
+
+(t/deftest dragging-a-node-or-segment-onto-another-merges-them
+  (let [id      (random-uuid)
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :line-to :params {:x 10 :y 0}}
+                  {:command :move-to :params {:x 12 :y 0}}
+                  {:command :line-to :params {:x 30 :y 0}}])
+        mk      (fn [selection]
+                  (-> (selectable-path-state id content selection)
+                      (assoc-in [:workspace-local :zoom] 1)))
+        emit-of (fn [state]
+                  (let [out (atom [])]
+                    (->> (ptk/watch (path.edition/merge-dragged-on-drop)
+                                    state (rx/subject))
+                         (rx/subs! #(swap! out conj %)))
+                    @out))
+        welded  [{:x 0 :y 0} {:x 11 :y 0} {:x 30 :y 0}]]
+    (t/testing "a single node dropped within range of another node merges them"
+      (let [state    (mk {:nodes #{1} :segments #{} :handlers #{}})
+            events   (emit-of state)
+            content' (vec (get-in (ptk/update (first events) state)
+                                  [:workspace-drawing :object :content]))]
+        (t/is (= 1 (count events)))
+        ;; the end of the first subpath (10,0) dropped onto the start of the
+        ;; second (12,0): they weld into one continuous path at the midpoint
+        (t/is (= welded (mapv :params content')))))
+    (t/testing "a dragged segment whose endpoint lands on a node merges too"
+      ;; segment 1 (nodes (0,0)-(10,0)); its (10,0) end is within range of (12,0)
+      (let [state    (mk {:nodes #{} :segments #{1} :handlers #{}})
+            events   (emit-of state)
+            content' (vec (get-in (ptk/update (first events) state)
+                                  [:workspace-drawing :object :content]))]
+        (t/is (= 1 (count events)))
+        (t/is (= welded (mapv :params content')))))
+    (t/testing "a node dropped with no neighbour in range does not merge"
+      (t/is (empty? (emit-of (mk {:nodes #{3} :segments #{} :handlers #{}})))))))

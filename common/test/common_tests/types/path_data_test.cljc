@@ -1305,6 +1305,36 @@
     (t/is (= 18.0 (get-in curve [:params :c2x])))
     (t/is (= 20.0 (get-in curve [:params :x])))))
 
+(t/deftest segment-separate-single-node-junction
+  ;; separating a node where several lines meet (e.g. the coincident endpoints
+  ;; of different subpaths) gives one offset open end per line
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 5.0 :y 5.0}}
+                  {:command :move-to :params {:x 5.0 :y 5.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}])
+        result  (vec (path/separate-nodes content #{(gpt/point 5.0 5.0)}))]
+    (t/is (= [:move-to :line-to :move-to :line-to] (mapv :command result)))
+    ;; the first line keeps (5,5); the second subpath's start is offset by (8,8)
+    (t/is (= {:x 5.0 :y 5.0} (:params (nth result 1))))
+    (t/is (= {:x 13.0 :y 13.0} (:params (nth result 2))))
+    (t/is (= {:x 10.0 :y 10.0} (:params (nth result 3))))))
+
+(t/deftest segment-separate-single-node-junction-three-lines
+  ;; three lines meeting at a point separate into three distinct offset ends
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 5.0 :y 5.0}}
+                  {:command :move-to :params {:x 20.0 :y 0.0}}
+                  {:command :line-to :params {:x 5.0 :y 5.0}}
+                  {:command :move-to :params {:x 5.0 :y 5.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}])
+        result  (vec (path/separate-nodes content #{(gpt/point 5.0 5.0)}))]
+    (t/is (= [{:x 0.0 :y 0.0} {:x 5.0 :y 5.0}
+              {:x 20.0 :y 0.0} {:x 13.0 :y 13.0}
+              {:x 21.0 :y 21.0} {:x 10.0 :y 10.0}]
+             (mapv #(select-keys (:params %) [:x :y]) result)))))
+
 (t/deftest segment-flip-content-partial-selection
   ;; only the selected nodes and their handles move; others stay put
   (let [content (path/content
@@ -1701,6 +1731,21 @@
   (t/testing "merge-nodes with nil content does not throw"
     (let [result (path/merge-nodes nil #{(gpt/point 0 0)})]
       (t/is (some? result)))))
+
+(t/deftest path-merge-disconnected-nodes
+  ;; merging nodes that are not on the same subpath joins them with a line
+  ;; first (as if a line were drawn between them) and then merges: both nodes
+  ;; collapse onto their shared midpoint and the join line leaves no leftover
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :move-to :params {:x 0.0 :y 10.0}}
+                  {:command :line-to :params {:x 10.0 :y 10.0}}])
+        pts     #{(gpt/point 10.0 0.0) (gpt/point 0.0 10.0)}
+        result  (vec (path/merge-nodes content pts))]
+    (t/is (= [{:x 0.0 :y 0.0} {:x 5.0 :y 5.0}
+              {:x 5.0 :y 5.0} {:x 10.0 :y 10.0}]
+             (mapv :params result)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; BOOL OPERATIONS — INTERSECTION / DIFFERENCE / EXCLUSION

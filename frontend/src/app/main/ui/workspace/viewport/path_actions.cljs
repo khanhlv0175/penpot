@@ -67,7 +67,9 @@
        :make-curve (and points-selected? (not is-curve?))
        :add-node segments-selected?
        :remove-node points-selected?
-       :merge-nodes segments-selected?
+       ;; Merge works on any 2+ selected nodes: connected ones collapse their
+       ;; segment, disconnected ones are joined with a line first, then merged.
+       :merge-nodes (and points-selected? (>= num-points 2))
        :join-nodes (and points-selected? (>= num-points 2) (< num-segments max-segments))
        ;; A single selected node separates into two offset nodes; two or
        ;; more separate the segments between them.

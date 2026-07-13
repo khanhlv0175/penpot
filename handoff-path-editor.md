@@ -417,11 +417,10 @@ Work planned on top of the polished editor, with required groundwork:
    (`select-path-area` computes the lower-priority sets lazily). Live-verified with
    real drags on a bowed curve: curve-only rect → segment, rect with a node → that
    node only, handler-only rect → that handler, rect over everything → all nodes.
-- [ ] **Feature 4 — border radius in path corners (round corners).** Fits the existing
-   `process-path-tool` pipeline (like make-corner/make-curve); main work is a
-   corner-fillet geometry fn in `common.types.path`. If a per-node radius becomes a
-   persistent, editable property (rather than a one-shot transform), node identity
-   matters again — per-node params can't be keyed by position.
+- **Feature 4 — border radius in path corners (round corners). Dropped 2026-07-13**
+   (user decision): no further work planned here. (Was: a corner-fillet geometry fn in
+   `common.types.path` on the `process-path-tool` pipeline, reusing
+   `helpers/fit-cubic`/`fit-curve`.)
 - **Feature 5 — alignment of nodes (snap). Dropped 2026-07-11:** the current snapping
    behaviour is considered good enough; no further work planned here.
 - [x] **Feature 6 — improve curve-tool smoothing.** Completed 2026-07-11. Common:
@@ -736,20 +735,80 @@ Work planned on top of the polished editor, with required groundwork:
    during a handler drag. Verified: REPL store-drive (draw-mode state, `:edition` nil →
    modifiers written under the drawing-object id; preview suppressed during a drag) and an
    event test (`next-point-preview-is-suppressed-during-a-modifier-drag`).
+- [x] **Feature 21 — move segments and handlers with arrow keys.** Completed 2026-07-13.
+   Arrow / Shift+arrow now nudge selected **segments** and **handlers** too, not just
+   nodes (1px, or 10px with Shift, same pipeline). `move-selected` (the arrow event) now
+   reads the whole grouped selection: `node-indices = selected-nodes ∪
+   helpers/segment-node-indices(selected-segments)` moved rigidly as positions (endpoint
+   nodes + their handlers), and `selected-handlers` (filtered to `:curve-to` commands, so
+   a stale id can't re-curve a line) moved as lone control points. `set-move-modifier`
+   gained a `handler-ids` param: it still accumulates the delta into the node `points` via
+   `modify-content-point` (node + attached handlers rigid) and now also `update`s each
+   `[index prefix]` handler's `cx/cy` by the same delta. Node/segment moves stay
+   position-based (existing duplicate-coordinate collapse unchanged); handler moves are
+   index-based. A handler that belongs to a moved node just gets the same delta written
+   twice (idempotent). No opposite-angle matching on arrow nudges (pure translation, like
+   nodes). Tests `arrow-move-nudges-selected-handlers` and
+   `arrow-move-nudges-selected-segment-endpoints`; focused suite 35/89 green.
+- [x] **Feature 22 — merge nodes across subpaths (not just connected nodes).** Completed
+   2026-07-13. The merge-nodes button previously only worked on nodes that already share a
+   segment (`get-segments-with-points` empty ⇒ no-op) and was disabled otherwise. Now
+   merging disconnected nodes behaves exactly as if a line were drawn between them and then
+   merged. Common (`segment/merge-nodes`): always `join-nodes` first (creates straight
+   segments between selected points that aren't already connected; a no-op for connected
+   pairs, so connected merges are unchanged), then run the existing merge (group the
+   segments, `calculate-merge-points` = `gpt/center-points`, `separate-nodes` +
+   `replace-points`). Result: every selected node collapses onto the group centroid and the
+   join line leaves no leftover (it becomes degenerate and is filtered by `separate-nodes`).
+   Frontend gate (`path_actions/check-enabled`): `:merge-nodes` relaxed from
+   `segments-selected?` to `(and points-selected? (>= num-points 2))` so the button is
+   enabled for any 2+ selected nodes. Verified JVM: two disconnected subpaths, merge two
+   endpoints → both land on the midpoint `(5,5)`, join line gone; connected chain still
+   collapses to its centroid unchanged. Test `path-merge-disconnected-nodes`; common suite
+   138/449 green.
+- [x] **Feature 23 — separate a junction node into one node per line.** Completed
+   2026-07-13. Generalizes feature 13: separating a single selected node where **several**
+   lines meet (e.g. the coincident endpoints of different subpaths, or a merged point) now
+   produces one offset open end per incident segment, not just the first interior split.
+   Common (`segment/separate-node` rewritten as a single content walk): for position P it
+   handles every occurrence — a `:move-to` at P (subpath start) shifts so its departing
+   line leaves offset; an interior arriving segment (real next segment) keeps its arriving
+   end and breaks the departing one into a new subpath (as before); an arriving segment
+   that ends its subpath shifts its end. The first end keeps P and each following end is
+   shifted by an increasing multiple of `separate-node-offset` (8,8), carrying the adjacent
+   handler. A lone endpoint (k=0, zero offset) is still a no-op, and a node before a
+   `close-path` seam is still left alone. Verified JVM: interior single node unchanged
+   (`M0,0 L5,5 M13,13 L10,10`); two subpaths meeting → each line offset; three lines →
+   three distinct ends `(5,5)/(13,13)/(21,21)`. Tests
+   `segment-separate-single-node-junction{,-three-lines}`; common suite 140/454.
+- [x] **Feature 24 — drag a node or segment onto another to auto-merge.** Completed
+   2026-07-13 (extended to segments same day). After a node **or segment** drag, if any
+   moved node was dropped within `merge-drop-distance` (10px / zoom) of another node, the
+   closest such pair is merged automatically (reuses feature 22's `merge-nodes` via
+   `tools/process-path-tool`). Frontend (`edition.cljs`): both `drag-selected-points` and
+   `drag-selected-segments` now emit `(apply-content-modifiers)` then
+   `(merge-dragged-on-drop)`. That event computes the moved nodes as the selected `:nodes`
+   **plus** the endpoint nodes of any selected `:segments` (`helpers/segment-node-indices`),
+   then picks the closest (moved, non-moved) node pair within threshold and merges it.
+   Dropping the end of one subpath onto the start of another welds them into one continuous
+   path (end→start weld); other topologies collapse to the midpoint per feature 22.
+   Exact-coincident nodes are deduped by `get-points` (no separate target ⇒ already merged,
+   no-op). Required a new `edition → tools` require (verified acyclic:
+   `tools`→`dwe/helpers/state/path`, none lead back to `path.edition`). Test
+   `dragging-a-node-or-segment-onto-another-merges-them` (node near ⇒ weld; segment
+   endpoint near ⇒ weld; far ⇒ no-op); frontend suite 36/94.
 - [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
    Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
    single canonical stop path, and document or replace the load-bearing
    `rx/observe-on :async` / `rx/delay 0` boundaries (see §3). Not started.
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
-for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
-and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
-(`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
+for features 1–3, 8, 10, and 11 is complete.
 
 **Remaining work:**
 
-- [ ] **Open features** (see §6 entries above): 4 (round corners). Features 18/19/20 are
-  done; only feature 4 remains among the numbered features.
+- All numbered features are done or dropped (features 4 and 5 dropped by user decision);
+  none remain.
 - [ ] **Refactor — unify edition stop signals and make deferred ordering explicit**
   (see §6 entry above).
 - [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences

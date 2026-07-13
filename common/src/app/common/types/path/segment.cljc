@@ -786,41 +786,73 @@
 (def ^:private separate-node-offset (gpt/point 8 8))
 
 (defn- separate-node
-  "Splits the subpath at the single interior node at `point` into two open
-  ends a small distance apart, so the user can grab and move them. The
-  incoming side keeps the node in place; the outgoing side starts a new
-  subpath shifted by `separate-node-offset`, carrying its leading handler
-  along so the curve tangent is preserved."
+  "Separates the node at `point` into one open end per line arriving at it. A
+  plain interior node (two segments in one subpath) splits into two ends a small
+  distance apart; a junction where several segments meet (e.g. the coincident
+  endpoints of different subpaths) splits into one offset end per segment. The
+  first end keeps `point`; each following end is shifted by an increasing
+  multiple of `separate-node-offset`, carrying its adjacent handler so the curve
+  tangents are preserved."
   [content point]
   (let [content (vec content)
         n       (count content)
-        interior?
-        (fn [i]
-          (let [seg  (nth content i)
-                next (nth content (inc i) nil)]
-            (and (not= :move-to (:command seg))
-                 (= point (helpers/segment->point seg))
-                 (some? next)
-                 (not= :move-to (:command next))
-                 (not= :close-path (:command next)))))
-        idx (loop [i 0]
-              (cond
-                (>= i n)      nil
-                (interior? i) i
-                :else         (recur (inc i))))]
-    (if (nil? idx)
-      content
-      (let [{ox :x oy :y} separate-node-offset
-            move     (helpers/make-move-to (gpt/add point separate-node-offset))
-            next-seg (nth content (inc idx))
-            next-seg (cond-> next-seg
-                       (= :curve-to (:command next-seg))
-                       (-> (update-in [:params :c1x] + ox)
-                           (update-in [:params :c1y] + oy)))]
-        (-> (subvec content 0 (inc idx))
-            (conj move)
-            (conj next-seg)
-            (into (subvec content (+ idx 2))))))))
+        {ox :x oy :y} separate-node-offset
+        seg?    (fn [c] (and (some? c)
+                             (not= :move-to (:command c))
+                             (not= :close-path (:command c))))]
+    (loop [i      0
+           k      0
+           result (transient [])]
+      (if (>= i n)
+        (persistent! result)
+        (let [cmd   (nth content i)
+              nxt   (nth content (inc i) nil)
+              at-p? (and (not= :close-path (:command cmd))
+                         (= point (helpers/segment->point cmd)))]
+          (cond
+            ;; the subpath starts at P: shift the move-to so its departing line
+            ;; leaves from an offset point
+            (and at-p? (= :move-to (:command cmd)))
+            (let [off (gpt/point (* k ox) (* k oy))]
+              (recur (inc i) (inc k)
+                     (conj! result (-> cmd
+                                       (update-in [:params :x] + (:x off))
+                                       (update-in [:params :y] + (:y off))))))
+
+            ;; a segment arrives at P and another leaves it (interior): keep the
+            ;; arriving end and break the departing one into a new subpath
+            (and at-p? (seg? cmd) (seg? nxt))
+            (let [off  (gpt/point (* k ox) (* k oy))
+                  cmd' (cond-> (-> cmd
+                                   (update-in [:params :x] + (:x off))
+                                   (update-in [:params :y] + (:y off)))
+                         (= :curve-to (:command cmd))
+                         (-> (update-in [:params :c2x] + (:x off))
+                             (update-in [:params :c2y] + (:y off))))
+                  k2   (inc k)
+                  off2 (gpt/point (* k2 ox) (* k2 oy))
+                  mv   (helpers/make-move-to (gpt/add point off2))
+                  nxt' (cond-> nxt
+                         (= :curve-to (:command nxt))
+                         (-> (update-in [:params :c1x] + (:x off2))
+                             (update-in [:params :c1y] + (:y off2))))]
+              (recur (+ i 2) (inc k2)
+                     (-> result (conj! cmd') (conj! mv) (conj! nxt'))))
+
+            ;; a segment arrives at P and ends its subpath (next is a move-to or
+            ;; the end): shift its end away from P
+            (and at-p? (seg? cmd) (not= :close-path (:command nxt)))
+            (let [off (gpt/point (* k ox) (* k oy))]
+              (recur (inc i) (inc k)
+                     (conj! result (cond-> (-> cmd
+                                               (update-in [:params :x] + (:x off))
+                                               (update-in [:params :y] + (:y off)))
+                                     (= :curve-to (:command cmd))
+                                     (-> (update-in [:params :c2x] + (:x off))
+                                         (update-in [:params :c2y] + (:y off)))))))
+
+            :else
+            (recur (inc i) k (conj! result cmd))))))))
 
 (defn separate-nodes
   "Removes the segments between the points given. A single selected node is
@@ -930,9 +962,13 @@
          (mapv replace-command))))
 
 (defn merge-nodes
-  "Reduces the contiguous segments in points to a single point"
+  "Reduces the segments among `points` to a single point. Points that are not
+  already connected are first joined with straight segments (as if a line were
+  drawn between them and then merged), so the merge also works on nodes that do
+  not share a segment."
   [content points]
-  (let [segments (get-segments-with-points content points)]
+  (let [content  (join-nodes content points)
+        segments (get-segments-with-points content points)]
     (if (seq segments)
       (let [point->merge-point (-> segments
                                    (group-segments)

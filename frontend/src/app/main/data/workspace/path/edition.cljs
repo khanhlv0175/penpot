@@ -18,6 +18,7 @@
    [app.main.data.workspace.path.selection :as selection]
    [app.main.data.workspace.path.state :as st]
    [app.main.data.workspace.path.streams :as streams]
+   [app.main.data.workspace.path.tools :as tools]
    [app.main.data.workspace.path.undo :as undo]
    [app.main.streams :as ms]
    [app.util.mouse :as mse]
@@ -135,6 +136,47 @@
             (when (some? new-content)
               (rx/of (apply-content-modifiers* id new-content)))))))))
 
+(def ^:private merge-drop-distance
+  "Screen-space distance (px) within which dropping a dragged node onto another
+  node merges the two."
+  10)
+
+(defn merge-dragged-on-drop
+  "After a node or segment drag, if any moved node was dropped onto another node
+  (within `merge-drop-distance`) merge the closest such pair together — the same
+  result as selecting both and merging."
+  []
+  (ptk/reify ::merge-dragged-on-drop
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (dm/get-in state [:workspace-local :edit-path id :selection])
+
+            ;; nodes that just moved: selected nodes plus the endpoints of any
+            ;; selected (dragged) segment
+            moved-indices (into (get selection :nodes #{})
+                                (helpers/segment-node-indices content (get selection :segments #{})))
+            moved     (helpers/node-positions content moved-indices)
+            moved-set (set moved)
+
+            zoom      (dm/get-in state [:workspace-local :zoom] 1)
+            threshold (/ merge-drop-distance zoom)
+            others    (remove moved-set (path/get-points content))
+
+            pairs     (->> moved
+                           (keep (fn [p]
+                                   (let [near (filter #(<= (gpt/distance % p) threshold) others)]
+                                     (when (seq near)
+                                       (let [t (apply min-key #(gpt/distance % p) near)]
+                                         [p t (gpt/distance t p)]))))))
+            best      (when (seq pairs)
+                        (apply min-key #(nth % 2) pairs))]
+        (if (some? best)
+          (let [[p t _] best]
+            (rx/of (tools/process-path-tool #{p t} path/merge-nodes)))
+          (rx/empty))))))
+
 (defn modify-content-point
   [content {dx :x dy :y} modifiers point]
   (let [point-indices (path/point-indices content point) ;; [indices]
@@ -157,16 +199,30 @@
       (reduce modify-handler $ handler-indices))))
 
 (defn set-move-modifier
-  [points move-modifier]
+  "Accumulates a `move-modifier` delta into the content modifiers for the
+  given node `points` (each moved rigidly with its handlers) and the given
+  `handler-ids` (`[index prefix]`, each control point moved on its own)."
+  [points handler-ids move-modifier]
   (ptk/reify ::set-modifiers
     ptk/UpdateEvent
     (update [_ state]
-      (let [id (st/get-path-id state)
+      (let [id      (st/get-path-id state)
             content (st/get-path state :content)
-            modifiers-reducer (partial modify-content-point content move-modifier)
+            {dx :x dy :y} move-modifier
+
             content-modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
-            content-modifiers (->> points
-                                   (reduce modifiers-reducer content-modifiers))]
+
+            content-modifiers
+            (->> points
+                 (reduce (partial modify-content-point content move-modifier) content-modifiers))
+
+            content-modifiers
+            (->> handler-ids
+                 (reduce (fn [modifiers [index prefix]]
+                           (let [cx (d/prefix-keyword prefix :x)
+                                 cy (d/prefix-keyword prefix :y)]
+                             (update modifiers index assoc cx dx cy dy)))
+                         content-modifiers))]
 
         (-> state
             (assoc-in [:workspace-local :edit-path id :content-modifiers] content-modifiers))))))
@@ -248,7 +304,8 @@
               (streams/move-points-stream start-position selected-points)
               (rx/map #(move-selected-path-point start-position %))
               (rx/take-until stopper))
-         (rx/of (apply-content-modifiers)))))))
+         (rx/of (apply-content-modifiers)
+                (merge-dragged-on-drop)))))))
 
 (declare drag-selected-segments)
 (declare start-segment-drag)
@@ -338,7 +395,8 @@
                 (streams/move-points-stream start-position selected-points)
                 (rx/map #(move-selected-path-segment start-position %))
                 (rx/take-until stopper))
-           (rx/of (apply-content-modifiers))))))))
+           (rx/of (apply-content-modifiers)
+                  (merge-dragged-on-drop))))))))
 
 (defn bend-segment-modifier
   "Sets the content-modifiers that bend segment `index` (its base cubic
@@ -417,9 +475,21 @@
               current-move (dm/get-in state [:workspace-local :edit-path id :current-move])]
           ;; id can be null if we just selected the tool but we didn't start drawing
           (if (and id (= same-event current-move))
-            (let [content        (st/get-path state :content)
-                  selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
-                  points         (helpers/node-positions content selected-nodes)
+            (let [content           (st/get-path state :content)
+                  selection         (dm/get-in state [:workspace-local :edit-path id :selection])
+                  selected-nodes    (get selection :nodes #{})
+                  selected-segments (get selection :segments #{})
+                  selected-handlers (get selection :handlers #{})
+
+                  ;; nodes and segment endpoints move as rigid nodes (with their
+                  ;; handlers); selected handlers move as lone control points
+                  node-indices      (into selected-nodes
+                                          (helpers/segment-node-indices content selected-segments))
+                  points            (helpers/node-positions content node-indices)
+                  handler-ids       (into #{}
+                                          (filter (fn [[index _]]
+                                                    (= :curve-to (:command (nth content index nil)))))
+                                          selected-handlers)
 
                   move-events (->> stream
                                    (rx/filter (ptk/type? ::move-selected))
@@ -436,7 +506,7 @@
                 (->> move-events
                      (rx/take-until stopper)
                      (rx/scan #(gpt/add %1 mov-vec) (gpt/point 0 0))
-                     (rx/map #(set-move-modifier points %)))
+                     (rx/map #(set-move-modifier points handler-ids %)))
 
                 ;; First event is not read by the stream so we need to send it again
                 (rx/of (move-selected direction shift?)))
