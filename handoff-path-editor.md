@@ -441,6 +441,21 @@ Work planned on top of the polished editor, with required groundwork:
    curve-to segments rendering a smooth wave; a V stroke kept straight arms with a
    softly rounded valley (single tangent-aligned cubic within tolerance — dense
    sharp-corner data still splits, unit-tested).
+   **Corner-preservation fix (2026-07-13).** Sharp corners (zigzags) looked strange:
+   Schneider always shares a *center tangent* at a split (`(p[i-1] − p[i+1])`) to keep
+   joins G1-smooth, so at a sharp vertex both legs' handles pointed along that center
+   tangent (e.g. horizontal across a `/\` apex) instead of along their own legs — the
+   curve bulged over the corner. Fix (`fit-curve`): a corner pre-pass splits the point
+   sequence at vertices whose turn angle exceeds `default-corner-angle` (60°, new
+   `corner-index?` on `gpt/angle-with-other` of the in/out segment vectors), and each
+   span is fitted independently with its **own** end tangents (`fit-curve*` unchanged per
+   span). Corner joins therefore get non-collinear handles that follow each leg (a real
+   corner); smooth spans are byte-identical to before (single span ⇒ same tan1/tan2 ⇒
+   same output). 60° is principled for RDP-0.3 input (curves of radius > ~2px keep
+   per-segment turns < 60°, so no false corners; the sine/single-curve tolerance tests
+   still fit smoothly). New `helpers-fit-curve-keeps-sharp-corners` test (corner handles
+   ~90°, not ~180°); full common suite 137/448 green. `fit-curve` gained an optional
+   `corner-angle` arity (default 60°).
 - [x] **Feature 7 — remove node with curve approximation.** Completed 2026-07-11.
    Common layer only. `helpers/fit-cubic` (in `common.types.path.helpers`) is the
    shared least-squares bezier fit (Graphics Gems FitCurves generate-bezier step:

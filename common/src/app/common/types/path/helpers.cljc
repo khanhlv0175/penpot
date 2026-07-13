@@ -611,25 +611,59 @@
             (into (fit-curve* (subvec points 0 (inc split)) tan1 center tol2)
                   (fit-curve* (subvec points split) (gpt/negate center) tan2 tol2))))))))
 
+(def ^:private default-corner-angle
+  "Turn angle (degrees) above which a vertex in the sampled points is kept as a
+  sharp corner instead of being smoothed over."
+  60.0)
+
+(defn- corner-index?
+  "True when the path turns at interior point `i` more sharply than
+  `corner-angle` degrees (the angle between the incoming and outgoing segment
+  directions)."
+  [points i corner-angle]
+  (let [v-in  (gpt/to-vec (nth points (dec i)) (nth points i))
+        v-out (gpt/to-vec (nth points i) (nth points (inc i)))]
+    (and (not (mth/almost-zero? (gpt/length v-in)))
+         (not (mth/almost-zero? (gpt/length v-out)))
+         (> (gpt/angle-with-other v-in v-out) corner-angle))))
+
 (defn fit-curve
-  "Fits a sequence of cubic beziers through the ordered `points`, keeping
-  the maximum deviation within `tolerance` (Schneider's algorithm from
-  Graphics Gems' FitCurves). Returns a vector of `[start end h1 h2]`
-  curves whose shared endpoints chain the full sequence, or nil when
-  fewer than two distinct points remain."
-  [points tolerance]
-  (let [points (reduce (fn [acc point]
-                         (if (and (seq acc)
-                                  (< (gpt/distance (peek acc) point) 0.01))
-                           acc
-                           (conj acc point)))
-                       []
-                       points)
-        n      (count points)]
-    (when (>= n 2)
-      (let [tan1 (gpt/unit (gpt/to-vec (nth points 0) (nth points 1)))
-            tan2 (gpt/unit (gpt/to-vec (nth points (dec n)) (nth points (- n 2))))]
-        (fit-curve* points tan1 tan2 (* (double tolerance) (double tolerance)))))))
+  "Fits a sequence of cubic beziers through the ordered `points`, keeping the
+  maximum deviation within `tolerance` (Schneider's algorithm from Graphics
+  Gems' FitCurves). Vertices that turn more sharply than `corner-angle` degrees
+  are preserved as sharp corners — each side is fitted independently with its
+  own end tangents — so freehand zigzags keep their corners instead of being
+  rounded over. Returns a vector of `[start end h1 h2]` curves whose shared
+  endpoints chain the full sequence, or nil when fewer than two distinct points
+  remain."
+  ([points tolerance]
+   (fit-curve points tolerance default-corner-angle))
+  ([points tolerance corner-angle]
+   (let [points (reduce (fn [acc point]
+                          (if (and (seq acc)
+                                   (< (gpt/distance (peek acc) point) 0.01))
+                            acc
+                            (conj acc point)))
+                        []
+                        points)
+         n      (count points)]
+     (when (>= n 2)
+       (let [tol2    (* (double tolerance) (double tolerance))
+             ;; Split the point sequence at sharp corners; each span is fitted
+             ;; on its own so the joins at corners stay real corners
+             ;; (non-collinear handles), while smooth spans keep their G1 fit.
+             corners (into [] (filter #(corner-index? points % corner-angle))
+                           (range 1 (dec n)))
+             bounds  (concat [0] corners [(dec n)])]
+         (into []
+               (mapcat (fn [[a b]]
+                         (let [span (subvec points a (inc b))
+                               m    (count span)]
+                           (when (>= m 2)
+                             (let [tan1 (gpt/unit (gpt/to-vec (nth span 0) (nth span 1)))
+                                   tan2 (gpt/unit (gpt/to-vec (nth span (dec m)) (nth span (- m 2))))]
+                               (fit-curve* span tan1 tan2 tol2))))))
+               (partition 2 1 bounds)))))))
 
 (defn curve-split
   "Splits a curve into two at the given parametric value `t`.

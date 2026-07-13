@@ -1361,6 +1361,29 @@
                                pts))]
     (t/is (<= max-dev (+ tol 0.05)))))
 
+(t/deftest helpers-fit-curve-keeps-sharp-corners
+  ;; a sharp corner is preserved as a real corner: the handles on either side
+  ;; follow their own leg instead of being smoothed collinear over the vertex
+  (let [corner (gpt/point 10.0 10.0)
+        ;; two legs meeting at a 90 degree corner: (0,0)->(10,10)->(20,0)
+        pts    (into []
+                     (concat
+                      (map #(gpt/point (double %) (double %)) (range 0 11))
+                      (map #(gpt/point (+ 10.0 %) (- 10.0 %)) (range 1 11))))
+        result (path.helpers/fit-curve pts 0.1)
+        ;; the two curves meeting at the corner
+        left   (first (filter #(= corner (nth % 1)) result))
+        right  (first (filter #(= corner (nth % 0)) result))
+        v-in   (gpt/to-vec corner (nth left 3))   ;; incoming handle (h2) direction
+        v-out  (gpt/to-vec corner (nth right 2))  ;; outgoing handle (h1) direction
+        angle  (gpt/angle-with-other v-in v-out)]
+    (t/is (some? left))
+    (t/is (some? right))
+    ;; a smoothed (rounded) join would put the handles collinear (~180 deg);
+    ;; a real corner reflects the two legs (~90 deg here)
+    (t/is (< angle 135.0))
+    (t/is (mth/close? 90.0 angle 15.0))))
+
 (t/deftest segment-smooth-points->content
   (t/testing "two points produce a straight segment"
     (let [content (path.segment/smooth-points->content
