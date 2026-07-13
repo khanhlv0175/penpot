@@ -38,7 +38,7 @@
       (empty? (get modifiers index)) (dissoc index))))
 
 (defn modify-selected-handlers
-  [id primary start-modifiers dx dy match-opposite?]
+  [id primary start-modifiers dx dy alt?]
   (ptk/reify ::modify-selected-handlers
     ptk/UpdateEvent
     (update [_ state]
@@ -63,13 +63,19 @@
                      delta          (gpt/add start-delta move-delta)
                      opposite-id    (path/opposite-index content index prefix)
                      opposite-selected? (contains? selected-handlers opposite-id)
-                     match-opposite? (and match-opposite? (not opposite-selected?))
+                     ;; Alt toggles the handler join in both directions: a
+                     ;; currently smooth (joined) pair breaks apart, and a
+                     ;; currently independent pair re-joins into a mirror.
+                     joined?        (helpers/handlers-joined? content index prefix)
+                     match-opposite? (and joined? (not alt?) (not opposite-selected?))
+                     rejoin?        (and (not joined?) alt? (not opposite-selected?))
                      handler-modifiers
                      (cond-> (helpers/move-handler-modifiers content
                                                              index
                                                              prefix
                                                              false
                                                              match-opposite?
+                                                             rejoin?
                                                              (:x delta)
                                                              (:y delta))
                        opposite-selected?
@@ -448,7 +454,7 @@
    (ptk/reify ::start-move-handler
      ptk/WatchEvent
      (watch [_ state _]
-       (let [id                (dm/get-in state [:workspace-local :edition])
+       (let [id                (st/get-path-id state)
              handler-id        [index prefix]
              selected-handlers (dm/get-in state
                                           [:workspace-local :edit-path id :selection :handlers]
@@ -466,7 +472,7 @@
   (ptk/reify ::drag-selected-handlers
     ptk/WatchEvent
     (watch [_ state stream]
-      (let [id              (dm/get-in state [:workspace-local :edition])
+      (let [id              (st/get-path-id state)
             content         (st/get-path state :content)
             points          (path/get-points content)
             start-modifiers (dm/get-in state
@@ -498,7 +504,7 @@
                                              start-modifiers
                                              (:x delta)
                                              (:y delta)
-                                             (not alt?)))))
+                                             alt?))))
               (rx/take-until stopper))
          (rx/of (apply-content-modifiers)))))))
 

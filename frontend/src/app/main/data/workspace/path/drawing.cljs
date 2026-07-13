@@ -67,18 +67,20 @@
   (ptk/reify ::preview-next-point
     ptk/UpdateEvent
     (update [_ state]
-      (let [id         (st/get-path-id state)
-            fix-angle? shift?
-            last-point (get-in state [:workspace-local :edit-path id :last-point])
-            position   (cond-> (gpt/point x y)
-                         fix-angle? (path.helpers/position-fixed-angle last-point))
-            content    (st/get-path state :content)
-
-            {:keys [last-point prev-handler]}
-            (get-in state [:workspace-local :edit-path id])
-
-            segment (path/next-node content position last-point prev-handler)]
-        (assoc-in state [:workspace-local :edit-path id :preview] segment)))))
+      (let [id        (st/get-path-id state)
+            edit-path (get-in state [:workspace-local :edit-path id])]
+        ;; While a modifier drag is in progress (e.g. dragging a placed node's
+        ;; handler while still drawing the path, feature 20) the next-point
+        ;; preview must not follow the mouse.
+        (if (seq (:content-modifiers edit-path))
+          state
+          (let [fix-angle? shift?
+                {:keys [last-point prev-handler]} edit-path
+                position   (cond-> (gpt/point x y)
+                             fix-angle? (path.helpers/position-fixed-angle last-point))
+                content    (st/get-path state :content)
+                segment    (path/next-node content position last-point prev-handler)]
+            (assoc-in state [:workspace-local :edit-path id :preview] segment)))))))
 
 (defn add-node
   [{:keys [x y shift?]}]

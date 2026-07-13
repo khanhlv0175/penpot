@@ -131,11 +131,15 @@
 
 (mf/defc path-handler*
   {::mf/private true}
-  [{:keys [index prefix point handler zoom is-selected is-hover edit-mode snap-angle]}]
+  [{:keys [index prefix point handler zoom is-selected is-hover snap-angle]}]
   (let [x       (dm/get-prop handler :x)
         y       (dm/get-prop handler :y)
-        is-draw (= edit-mode :draw)
-        is-move (= edit-mode :move)
+
+        ;; Placed-node handlers (those carrying an index) are interactive in
+        ;; both draw and move mode; the transient draw handlers (drag/prev
+        ;; cursors, no index) stay inert.
+        is-interactive
+        (some? index)
 
         is-active
         (or ^boolean is-selected
@@ -153,18 +157,17 @@
 
         on-pointer-down
         (mf/use-fn
-         (mf/deps index prefix is-move)
+         (mf/deps index prefix is-interactive)
          (fn [event]
-           (when (dom/left-mouse? event)
+           (when (and ^boolean is-interactive (dom/left-mouse? event))
              (dom/stop-propagation event)
              (dom/prevent-default event)
 
-             (when ^boolean is-move
-               (st/emit! (drp/start-move-handler index
-                                                 prefix
-                                                 (kbd/shift? event)))))))]
+             (st/emit! (drp/start-move-handler index
+                                               prefix
+                                               (kbd/shift? event))))))]
 
-    [:g.handler {:pointer-events (if ^boolean is-draw "none" "visible")}
+    [:g.handler {:pointer-events (if ^boolean is-interactive "visible" "none")}
      [:line
       {:x1 (:x point)
        :y1 (:y point)
@@ -201,7 +204,7 @@
                :on-pointer-down on-pointer-down
                :on-pointer-enter on-enter
                :on-pointer-leave on-leave
-               :class (when ^boolean is-move
+               :class (when ^boolean is-interactive
                         (cur/get-static "pointer-move"))
                :style {:fill "none"
                        :stroke-width 0}}]]))
@@ -490,7 +493,9 @@
              (boolean position-handlers)]
 
          [:g.path-node {:key (dm/str "node-" index)}
-          [:g.point-handlers {:pointer-events (when (= edit-mode :draw) "none")}
+          ;; Placed-node handlers stay interactive in draw mode too, so their
+          ;; Bezier handles can be grabbed while still drawing the path.
+          [:g.point-handlers
            (for [[hindex prefix] position-handlers]
              (let [handler-position  (path/get-handler-point content hindex prefix)
                    handler-hover?    (contains? hover-handlers [hindex prefix])

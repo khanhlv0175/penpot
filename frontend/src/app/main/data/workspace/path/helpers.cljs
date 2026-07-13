@@ -60,31 +60,58 @@
       [(- (:x new-opposite) (:x opposite))
        (- (:y new-opposite) (:y opposite))])))
 
+(defn handlers-joined?
+  "True when a node's two handlers are collinear on opposite sides (a smooth
+  node): the angle between them is ~180 degrees. A node with a missing handler
+  (a corner/line side) is not joined."
+  [content index prefix]
+  (let [[op-idx op-prefix] (path/opposite-index content index prefix)
+        node     (path/handler->node content index prefix)
+        handler  (path/get-handler-point content index prefix)
+        opposite (when op-idx (path/get-handler-point content op-idx op-prefix))]
+    (boolean
+     (and (some? op-idx)
+          (some? handler)
+          (some? opposite)
+          (not= handler node)
+          (not= opposite node)
+          (<= (mth/abs (- 180 (angle-points node handler opposite))) 0.1)))))
+
 (defn move-handler-modifiers
-  [content index prefix match-distance? match-angle? dx dy]
+  ([content index prefix match-distance? match-angle? dx dy]
+   (move-handler-modifiers content index prefix match-distance? match-angle? false dx dy))
+  ([content index prefix match-distance? match-angle? rejoin? dx dy]
 
-  (let [[cx cy] (path.helpers/prefix->coords prefix)
-        [op-idx op-prefix] (path/opposite-index content index prefix)
+   (let [[cx cy] (path.helpers/prefix->coords prefix)
+         [op-idx op-prefix] (path/opposite-index content index prefix)
 
-        node (path/handler->node content index prefix)
-        handler (path/get-handler-point content index prefix)
-        opposite (path/get-handler-point content op-idx op-prefix)
+         node (path/handler->node content index prefix)
+         handler (path/get-handler-point content index prefix)
+         opposite (path/get-handler-point content op-idx op-prefix)
 
-        [ocx ocy] (path.helpers/prefix->coords op-prefix)
-        [odx ody] (calculate-opposite-delta node handler opposite match-angle? match-distance? dx dy)
+         [ocx ocy] (path.helpers/prefix->coords op-prefix)
+         [odx ody] (calculate-opposite-delta node handler opposite match-angle? match-distance? dx dy)
 
-        hnv (if (some? handler)
-              (gpt/to-vec node (-> handler (update :x + dx) (update :y + dy)))
-              (gpt/point dx dy))]
+         hnv (if (some? handler)
+               (gpt/to-vec node (-> handler (update :x + dx) (update :y + dy)))
+               (gpt/point dx dy))]
 
-    (-> {}
-        (update index assoc cx dx cy dy)
+     (-> {}
+         (update index assoc cx dx cy dy)
 
-        (cond-> (and (some? op-idx) (not= opposite node))
-          (update op-idx assoc ocx odx ocy ody)
+         (cond->
+          ;; Re-join: force the opposite handler to mirror the dragged one
+          ;; (opposite angle, equal length) regardless of its current angle.
+          (and (some? op-idx) rejoin? (not= opposite node))
+           (update op-idx assoc
+                   ocx (- (:x node) (:x hnv) (:x opposite))
+                   ocy (- (:y node) (:y hnv) (:y opposite)))
 
-          (and (some? op-idx) (= opposite node) match-distance? match-angle?)
-          (update op-idx assoc ocx (- (:x hnv)) ocy (- (:y hnv)))))))
+           (and (some? op-idx) (not rejoin?) (not= opposite node))
+           (update op-idx assoc ocx odx ocy ody)
+
+           (and (some? op-idx) (= opposite node) match-distance? match-angle?)
+           (update op-idx assoc ocx (- (:x hnv)) ocy (- (:y hnv))))))))
 
 ;; --- Stable node/segment/handler identity
 ;;

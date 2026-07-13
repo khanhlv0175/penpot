@@ -679,18 +679,48 @@ Work planned on top of the polished editor, with required groundwork:
    `esc-pressed` first branch: while ON, Escape only turns it off and keeps the editor open.
    i18n `workspace.path.actions.add-nodes` in `en.po` (dev bundle shows the raw key until
    translations recompiled). `cljfmt` clean, `clj-kondo` 0/0, main build `:ok`.
-- [ ] **Feature 18 — default path stroke alignment to center.** New paths should be created
-   with a centered stroke; every other shape type keeps the current inside (`:inner`)
-   default. Scope the changed default to path creation only.
-- [ ] **Feature 19 — Alt toggles handler join in both directions.** Today, holding Alt
-   while dragging a joined (mirrored) handler breaks the pair so the two move
-   independently. Add the reverse: holding Alt while dragging an already-independent
-   handler re-joins the pair (restores mirrored / opposite-angle movement). Lives in the
-   handler-drag pipeline (`move-handler-stream` / `modify-handler`, opposite-angle
-   matching).
-- [ ] **Feature 20 — move handlers while drawing/creating a path.** During draw mode (not
-   only move mode) the user should be able to grab and drag the Bézier handlers of
-   already-placed nodes.
+- [x] **Feature 18 — default path stroke alignment to center.** Completed 2026-07-13.
+   `minimal-path-attrs` (`common/src/app/common/types/shape.cljc`) — the path-creation
+   default merged in by `setup-shape` for `:path`/`:curve` — now sets
+   `:stroke-alignment :center` instead of `:inner`. Scoped to creation only: every other
+   shape type keeps its own minimal default, the manual "+ add stroke" (`cts/default-stroke`
+   / `colors/build-stroke-style-attrs`) is untouched, shape→path conversion preserves
+   existing strokes, and an explicit `:strokes` in the creation props (e.g. the Line/Arrow
+   tool, already center) still wins over the minimal default via `setup-shape`'s merge.
+   REPL-verified: `(-> (cts/setup-shape {:type :path}) :strokes first :stroke-alignment)`
+   → `:center`.
+- [x] **Feature 19 — Alt toggles handler join in both directions.** Completed 2026-07-13.
+   The join is *derived*, not stored: two handles are "joined" when collinear on opposite
+   sides (~180°, `helpers/handlers-joined?`). Alt now toggles relative to that state — a
+   joined pair **breaks** (opposite stays put), an independent (corner) pair **re-joins**
+   into a full mirror (opposite angle + equal length). `move-handler-modifiers` gained a
+   `rejoin?` arity that forces the opposite handle onto the mirror
+   `node - hnv - opposite` regardless of current angle; `modify-selected-handlers` takes
+   `alt?` (was `match-opposite?`) and per-node derives
+   `match-opposite? = (and joined? (not alt?) (not opp-selected?))` and
+   `rejoin? = (and (not joined?) alt? (not opp-selected?))`. Keep-smooth (no-alt on a
+   joined node) is unchanged (incremental angle match). Re-join persists in geometry, so
+   the node stays smooth on the next no-alt drag. Pure-fn + event tests added
+   (`handlers-joined-detects-…`, `handler-drag-without-alt-keeps-…`,
+   `handler-drag-with-alt-breaks-…`, `handler-drag-with-alt-rejoins-…`).
+- [x] **Feature 20 — move handlers while drawing/creating a path.** Completed 2026-07-13.
+   Placed-node Bézier handlers are now grabbable in draw mode, not just move mode. Two
+   parts: (1) **id resolution** — `start-move-handler`/`drag-selected-handlers` (and
+   `modify-selected-handlers` via its passed id) resolved the path id from
+   `[:workspace-local :edition]`, which is **nil during creation**; switched to
+   `st/get-path-id` (prefers `[:workspace-drawing :object :id]`), so the handler-drag
+   pipeline targets the drawing-object-keyed edit-path in both draw and move mode.
+   (2) **editor interactivity** — `path-handler*` keys pointer-events / pointer-down /
+   move-cursor on `is-interactive (some? index)` (placed-node handlers, `visible`;
+   transient draw/prev cursors have no index → inert) instead of `is-move`/`is-draw`, and
+   the `:g.point-handlers` wrapper dropped its draw-mode `pointer-events none`. Handlers
+   still `stop-propagation` and the viewport only emits `:down` for `viewport-controls`,
+   so grabbing a handler mid-draw never spawns a spurious `add-node`. The next-point
+   preview is suppressed while a modifier drag is active (`preview-next-point` no-ops when
+   `:content-modifiers` is non-empty) so the pending segment doesn't chase the cursor
+   during a handler drag. Verified: REPL store-drive (draw-mode state, `:edition` nil →
+   modifiers written under the drawing-object id; preview suppressed during a drag) and an
+   event test (`next-point-preview-is-suppressed-during-a-modifier-drag`).
 - [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
    Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
    single canonical stop path, and document or replace the load-bearing
@@ -703,8 +733,8 @@ and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 
 **Remaining work:**
 
-- [ ] **Open features** (see §6 entries above): 4 (round corners), 18 (default path stroke
-  to center), 19 (Alt toggles handler join both ways), 20 (move handlers while drawing).
+- [ ] **Open features** (see §6 entries above): 4 (round corners). Features 18/19/20 are
+  done; only feature 4 remains among the numbered features.
 - [ ] **Refactor — unify edition stop signals and make deferred ordering explicit**
   (see §6 entry above).
 - [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences

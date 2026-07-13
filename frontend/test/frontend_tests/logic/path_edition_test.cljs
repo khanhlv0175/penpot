@@ -615,3 +615,90 @@
     ;; position-based move pipeline never drags original and pasted together
     (t/is (= {:x 10 :y 10} (select-keys (:params (first pasted)) [:x :y])))
     (t/is (= {:x 20 :y 10} (select-keys (:params (second pasted)) [:x :y])))))
+
+(defn- corner-path-content
+  "Like selectable-path-content but the node at (10,0) is a corner: its
+  outgoing handle [2 :c1] is bent off the incoming handle [1 :c2]."
+  []
+  (path/content
+   [{:command :move-to
+     :params {:x 0 :y 0}}
+    {:command :curve-to
+     :params {:c1x 2 :c1y 0
+              :c2x 8 :c2y 0
+              :x 10 :y 0}}
+    {:command :curve-to
+     :params {:c1x 12 :c1y 6
+              :c2x 18 :c2y 0
+              :x 20 :y 0}}]))
+
+(t/deftest handlers-joined-detects-smooth-vs-corner-nodes
+  ;; node (10,0): incoming [1 :c2]=(8,0), outgoing [2 :c1]
+  (t/is (path.helpers/handlers-joined? (selectable-path-content) 2 :c1))
+  (t/is (not (path.helpers/handlers-joined? (corner-path-content) 2 :c1))))
+
+(t/deftest handler-drag-without-alt-keeps-a-smooth-node-smooth
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        state     (selectable-path-state id content {:nodes #{} :segments #{}
+                                                     :handlers #{[2 :c1]}})
+        ;; alt? false on a joined node preserves the opposite-angle match
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 false)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= (gpt/point 12 4) (path/get-handler-point content' 2 :c1)))
+    ;; the opposite rotated to stay collinear -> still a smooth node
+    (t/is (not= (gpt/point 8 0) (path/get-handler-point content' 1 :c2)))
+    (t/is (path.helpers/handlers-joined? content' 2 :c1))))
+
+(t/deftest handler-drag-with-alt-breaks-a-smooth-node
+  (let [id        (random-uuid)
+        content   (selectable-path-content)
+        state     (selectable-path-state id content {:nodes #{} :segments #{}
+                                                     :handlers #{[2 :c1]}})
+        ;; alt? true on a joined node breaks the pair: the opposite stays put
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 true)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= (gpt/point 12 4) (path/get-handler-point content' 2 :c1)))
+    (t/is (= (gpt/point 8 0) (path/get-handler-point content' 1 :c2)))
+    (t/is (not (path.helpers/handlers-joined? content' 2 :c1)))))
+
+(t/deftest handler-drag-with-alt-rejoins-a-corner-node
+  (let [id        (random-uuid)
+        content   (corner-path-content)
+        state     (selectable-path-state id content {:nodes #{} :segments #{}
+                                                     :handlers #{[2 :c1]}})
+        ;; alt? true on an independent (corner) node re-joins into a mirror:
+        ;; base [2 :c1]=(12,6) dragged by (2,-6) -> (14,0); the opposite
+        ;; [1 :c2]=(8,0) mirrors it around node (10,0) -> (6,0)
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 2 -6 true)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= (gpt/point 14 0) (path/get-handler-point content' 2 :c1)))
+    (t/is (= (gpt/point 6 0) (path/get-handler-point content' 1 :c2)))
+    (t/is (path.helpers/handlers-joined? content' 2 :c1))))
+
+(t/deftest next-point-preview-is-suppressed-during-a-modifier-drag
+  (let [id      (random-uuid)
+        content (path/content [{:command :move-to :params {:x 0 :y 0}}
+                               {:command :line-to :params {:x 100 :y 0}}])
+        mk      (fn [modifiers]
+                  ;; draw-mode creation: :edition is nil, the path lives under
+                  ;; the drawing object and the preview is driven by the loop
+                  {:workspace-drawing {:object {:id id :type :path :content content}}
+                   :workspace-local {:edition nil
+                                     :zoom 1
+                                     :edit-path {id {:edit-mode :draw
+                                                     :last-point (gpt/point 100 0)
+                                                     :content-modifiers modifiers}}}})
+        event   (path.drawing/preview-next-point {:x 150 :y 40 :shift? false})
+        idle    (ptk/update event (mk {}))
+        during  (ptk/update event (mk {1 {:c1x 5 :c1y 5}}))]
+    ;; no active drag: the next-point preview updates as usual
+    (t/is (some? (get-in idle [:workspace-local :edit-path id :preview])))
+    ;; a placed handler is being dragged mid-draw: the preview must not move
+    (t/is (nil? (get-in during [:workspace-local :edit-path id :preview])))))
