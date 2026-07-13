@@ -55,9 +55,14 @@
 
 (mf/defc menu-entry*
   {::mf/private true}
-  [{:keys [title shortcut on-click on-pointer-enter on-pointer-leave
+  [{:keys [title shortcut shortcut-key on-click on-pointer-enter on-pointer-leave
            on-unmount children is-selected icon disabled value]}]
-  (let [submenu-ref (mf/use-ref nil)
+  (let [cs              (mf/deref refs/custom-shortcuts)
+        customized?     (and shortcut-key
+                             (let [c (get-in cs [:workspace shortcut-key])]
+                               (and c (not= c ""))))
+
+        submenu-ref (mf/use-ref nil)
         hovering?   (mf/use-ref false)
 
         on-click'
@@ -127,7 +132,8 @@
          [:span   {:class (stl/css :shortcut)}
           (for [[idx sc] (d/enumerate (scd/split-sc shortcut))]
             [:span {:key (dm/str shortcut "-" idx)
-                    :class (stl/css :shortcut-key)} sc])])
+                    :class (stl/css-case :shortcut-key true
+                                         :customized-key customized?)} sc])])
 
        (when (> (count children) 1)
          [:span {:class (stl/css :submenu-icon)}
@@ -205,18 +211,23 @@
     [:*
      [:> menu-entry* {:title (tr "workspace.shape.menu.copy")
                       :shortcut (get-tt :copy)
+                      :shortcut-key :copy
                       :on-click do-copy}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.copy-link")
                       :shortcut (get-tt :copy-link)
+                      :shortcut-key :copy-link
                       :on-click do-copy-link}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.cut")
                       :shortcut (get-tt :cut)
+                      :shortcut-key :cut
                       :on-click do-cut}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.paste")
                       :shortcut (get-tt :paste)
+                      :shortcut-key :paste
                       :on-click do-paste}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.duplicate")
                       :shortcut (get-tt :duplicate)
+                      :shortcut-key :duplicate
                       :on-click do-duplicate}]
 
      [:> menu-entry* {:title (tr "workspace.shape.menu.copy-paste-as")
@@ -240,10 +251,12 @@
 
       [:> menu-entry* {:title (tr "workspace.shape.menu.copy-props")
                        :shortcut (get-tt :copy-props)
+                       :shortcut-key :copy-props
                        :disabled multiple?
                        :on-click handle-copy-props}]
       [:> menu-entry* {:title (tr "workspace.shape.menu.paste-props")
                        :shortcut (get-tt :paste-props)
+                       :shortcut-key :paste-props
                        :disabled (and (cf/check-browser? :chrome) (not @enabled-paste-props*))
                        :on-click handle-paste-props}]]
 
@@ -285,15 +298,19 @@
                            :icon (usi/get-shape-icon object)}])])
      [:> menu-entry* {:title (tr "workspace.shape.menu.forward")
                       :shortcut (get-tt :bring-forward)
+                      :shortcut-key :bring-forward
                       :on-click do-bring-forward}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.front")
                       :shortcut (get-tt :bring-front)
+                      :shortcut-key :bring-front
                       :on-click do-bring-to-front}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.backward")
                       :shortcut (get-tt :bring-backward)
+                      :shortcut-key :bring-backward
                       :on-click do-send-backward}]
      [:> menu-entry* {:title (tr "workspace.shape.menu.back")
                       :shortcut (get-tt :bring-back)
+                      :shortcut-key :bring-back
                       :on-click do-send-to-back}]
 
      [:> menu-separator* {}]]))
@@ -309,10 +326,12 @@
     [:*
      [:> menu-entry* {:title (tr "workspace.shape.menu.flip-vertical")
                       :shortcut (get-tt :flip-vertical)
+                      :shortcut-key :flip-vertical
                       :on-click do-flip-vertical}]
 
      [:> menu-entry* {:title (tr "workspace.shape.menu.flip-horizontal")
                       :shortcut (get-tt :flip-horizontal)
+                      :shortcut-key :flip-horizontal
                       :on-click do-flip-horizontal}]
      [:> menu-separator* {}]]))
 
@@ -332,6 +351,7 @@
                           :on-click do-toggle-thumbnail}]
          [:> menu-entry* {:title (tr "workspace.shape.menu.thumbnail-set")
                           :shortcut (get-tt :thumbnail-set)
+                          :shortcut-key :thumbnail-set
                           :on-click do-toggle-thumbnail}])
        [:> menu-separator* {}]])))
 
@@ -347,6 +367,7 @@
        [:> menu-separator* {}]
        [:> menu-entry* {:title (tr "workspace.shape.menu.rename")
                         :shortcut (get-tt :rename)
+                        :shortcut-key :rename
                         :on-click do-rename}]])))
 
 (mf/defc context-menu-group*
@@ -384,24 +405,29 @@
         (when (or has-bool? has-group? has-mask? has-frame?)
           [:> menu-entry* {:title (tr "workspace.shape.menu.ungroup")
                            :shortcut (get-tt :ungroup)
+                           :shortcut-key :ungroup
                            :on-click do-remove-group}])
 
         [:> menu-entry* {:title (tr "workspace.shape.menu.group")
                          :shortcut (get-tt :group)
+                         :shortcut-key :group
                          :on-click do-create-group}]
 
         (when (or multiple? (and is-group? (not has-mask?)) is-bool?)
           [:> menu-entry* {:title (tr "workspace.shape.menu.mask")
                            :shortcut (get-tt :mask)
+                           :shortcut-key :mask
                            :on-click do-mask-group}])
 
         (when has-mask?
           [:> menu-entry* {:title (tr "workspace.shape.menu.unmask")
                            :shortcut (get-tt :unmask)
+                           :shortcut-key :unmask
                            :on-click do-unmask-group}])
 
         [:> menu-entry* {:title (tr "workspace.shape.menu.create-artboard-from-selection")
                          :shortcut (get-tt :artboard-selection)
+                         :shortcut-key :artboard-selection
                          :on-click do-create-artboard-from-selection}]
         [:> menu-separator* {}]])]))
 
@@ -418,6 +444,7 @@
                               (tr "workspace.focus.focus-on")
                               (tr "workspace.focus.focus-off"))
                      :shortcut (get-tt :toggle-focus-mode)
+                     :shortcut-key :toggle-focus-mode
                      :on-click do-toggle-focus-mode}]))
 
 (mf/defc context-menu-path*
@@ -463,9 +490,10 @@
              (st/emit! (dw/change-bool-type (-> shapes first :id) bool-type))))]
     [:*
      (when (and single? (not is-frame?))
-       [:> menu-entry* {:title (tr "workspace.shape.menu.edit")
-                        :shortcut (get-tt :start-editing)
-                        :on-click do-start-editing}])
+      [:> menu-entry* {:title (tr "workspace.shape.menu.edit")
+                       :shortcut (get-tt :start-editing)
+                       :shortcut-key :start-editing
+                       :on-click do-start-editing}])
 
      (when-not (or disable-flatten has-frame? has-path?)
        [:> menu-entry* {:title (tr "workspace.shape.menu.flatten")
@@ -483,15 +511,19 @@
        [:> menu-entry* {:title (tr "workspace.shape.menu.path")}
         [:> menu-entry* {:title (tr "workspace.shape.menu.union")
                          :shortcut (get-tt :bool-union)
+                         :shortcut-key :bool-union
                          :on-click (make-do-bool :union)}]
         [:> menu-entry* {:title (tr "workspace.shape.menu.difference")
                          :shortcut (get-tt :bool-difference)
+                         :shortcut-key :bool-difference
                          :on-click (make-do-bool :difference)}]
         [:> menu-entry* {:title (tr "workspace.shape.menu.intersection")
                          :shortcut (get-tt :bool-intersection)
+                         :shortcut-key :bool-intersection
                          :on-click (make-do-bool :intersection)}]
         [:> menu-entry* {:title (tr "workspace.shape.menu.exclude")
                          :shortcut (get-tt :bool-exclude)
+                         :shortcut-key :bool-exclude
                          :on-click (make-do-bool :exclude)}]
 
         (when (and single? is-bool? (not disable-flatten))
@@ -512,20 +544,24 @@
         do-lock-shape #(st/emit! (dw/update-shape-flags ids {:blocked true}))
         do-unlock-shape #(st/emit! (dw/update-shape-flags ids {:blocked false}))]
     [:*
-     (if (every? :hidden shapes)
+      (if (every? :hidden shapes)
        [:> menu-entry* {:title (tr "workspace.shape.menu.show")
                         :shortcut (get-tt :toggle-visibility)
+                        :shortcut-key :toggle-visibility
                         :on-click do-show-shape}]
        [:> menu-entry* {:title (tr "workspace.shape.menu.hide")
                         :shortcut (get-tt :toggle-visibility)
+                        :shortcut-key :toggle-visibility
                         :on-click do-hide-shape}])
 
      (if (every? :blocked shapes)
        [:> menu-entry* {:title (tr "workspace.shape.menu.unlock")
                         :shortcut (get-tt :toggle-lock)
+                        :shortcut-key :toggle-lock
                         :on-click do-unlock-shape}]
        [:> menu-entry* {:title (tr "workspace.shape.menu.lock")
                         :shortcut (get-tt :toggle-lock)
+                        :shortcut-key :toggle-lock
                         :on-click do-lock-shape}])]))
 
 (mf/defc context-menu-prototype*
@@ -591,22 +627,26 @@
           (if has-flex?
             [:> menu-entry* {:title (tr "workspace.shape.menu.remove-flex")
                              :shortcut (get-tt :toggle-layout-flex)
+                             :shortcut-key :toggle-layout-flex
                              :on-click on-remove-layout}]
             [:> menu-entry* {:title (tr "workspace.shape.menu.remove-grid")
                              :shortcut (get-tt :toggle-layout-grid)
+                             :shortcut-key :toggle-layout-grid
                              :on-click on-remove-layout}])]
 
          (when (or single? (not any-is-variant?))
            [:div
             [:> menu-separator* {}]
-            [:> menu-entry* {:title (tr "workspace.shape.menu.add-flex")
-                             :shortcut (get-tt :toggle-layout-flex)
-                             :value "flex"
-                             :on-click on-add-layout}]
-            [:> menu-entry* {:title (tr "workspace.shape.menu.add-grid")
-                             :shortcut (get-tt :toggle-layout-grid)
-                             :value "grid"
-                             :on-click on-add-layout}]])))]))
+             [:> menu-entry* {:title (tr "workspace.shape.menu.add-flex")
+                              :shortcut (get-tt :toggle-layout-flex)
+                              :shortcut-key :toggle-layout-flex
+                              :value "flex"
+                              :on-click on-add-layout}]
+             [:> menu-entry* {:title (tr "workspace.shape.menu.add-grid")
+                              :shortcut (get-tt :toggle-layout-grid)
+                              :shortcut-key :toggle-layout-grid
+                              :value "grid"
+                              :on-click on-add-layout}]])))]))
 
 (mf/defc context-menu-component*
   {:mf/private true}
@@ -637,6 +677,7 @@
 
         [:> menu-entry* {:title (tr "workspace.shape.menu.create-component")
                          :shortcut (get-tt :create-component-variant)
+                         :shortcut-key :create-component-variant
                          :on-click do-add-component}]
         (when (not single?)
           [:> menu-entry* {:title (tr "workspace.shape.menu.create-multiple-components")
@@ -646,17 +687,19 @@
        [:*
         [:> menu-separator*]
         (for [entry (filter some? components-menu-entries)]
-          [:> menu-entry* {:key (:title entry)
-                           :title (:title entry)
-                           :shortcut (when (contains? entry :shortcut)
-                                       (get-tt (:shortcut entry)))
-                           :on-click (:action entry)}])])
+          (let [sc-key (:shortcut entry)]
+            [:> menu-entry* {:key (:title entry)
+                             :title (:title entry)
+                             :shortcut (when sc-key (get-tt sc-key))
+                             :shortcut-key sc-key
+                             :on-click (:action entry)}]))])
 
      (when variant-container?
        [:*
         [:> menu-separator*]
         [:> menu-entry* {:title (tr "workspace.shape.menu.add-variant")
                          :shortcut (get-tt :create-component-variant)
+                         :shortcut-key :create-component-variant
                          :on-click do-add-variant}]])
 
      (when (and (not single?) all-main? (not any-variant?))
@@ -693,9 +736,10 @@
         do-delete #(st/emit! (dw/delete-selected))]
     [:*
      [:> menu-separator* {}]
-     [:> menu-entry* {:title (tr "workspace.shape.menu.delete")
-                      :shortcut (get-tt :delete)
-                      :on-click do-delete}]]))
+      [:> menu-entry* {:title (tr "workspace.shape.menu.delete")
+                       :shortcut (get-tt :delete)
+                       :shortcut-key :delete
+                       :on-click do-delete}]]))
 
 (mf/defc shape-context-menu*
   {::mf/wrap [mf/memo]
@@ -772,14 +816,17 @@
      (when-not ^boolean read-only?
        [:> menu-entry* {:title (tr "workspace.shape.menu.paste")
                         :shortcut (get-tt :paste)
+                        :shortcut-key :paste
                         :on-click do-paste}])
      [:> menu-entry* {:title (tr "workspace.shape.menu.hide-ui")
                       :shortcut (get-tt :hide-ui)
+                      :shortcut-key :hide-ui
                       :on-click do-hide-ui}]
 
      (when (d/not-empty? focus)
        [:> menu-entry* {:title (tr "workspace.focus.focus-off")
                         :shortcut (get-tt :toggle-focus-mode)
+                        :shortcut-key :toggle-focus-mode
                         :on-click do-toggle-focus-mode}])]))
 
 (mf/defc grid-track-context-menu*
