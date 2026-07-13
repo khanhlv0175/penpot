@@ -591,6 +591,46 @@ Work planned on top of the polished editor, with required groundwork:
    (10,6)@≈31°→30°, (10,2)@≈11°→15°, (3,10)@≈73°→75° — all on 15° increments (the old
    code snapped 31° to 45°).
 
+- [x] **Feature 15 — show the path edition top bar during path creation.** Completed
+   2026-07-13 (requested mid-session). The top bar (`path-actions*`) previously appeared
+   only while editing a committed path, because its visibility gate keyed on
+   `[:workspace-local :edition]` (`path-editing? (some? edit-path-state)`, with
+   `edit-path-state (get edit-path edition)`), and `:edition` is nil during initial
+   creation. Now it is also shown while drawing a new path, so node snap can be toggled
+   mid-draw. Key insight: during creation the ephemeral edit state already exists — it is
+   keyed by the **in-progress drawing object id** (`st/get-path-id` prefers
+   `[:workspace-drawing :object :id]` over `:edition`), which is where `start-edition`
+   writes `:edit-mode :draw` and where `toggle-snap`/`snap-toggled-stream` read/write
+   `:snap-toggled`. Both viewports (`viewport.cljs`, `viewport_wasm.cljs`) gained two
+   bindings — `path-bar-state` (`edit-path-state` when editing, else
+   `(get edit-path (get drawing-obj :id))` when `path-drawing?`) and `path-bar-shape`
+   (`editing-shape` when editing, else `drawing-obj`) — and the render gate became
+   `(or (and path-editing? single-select?) (and path-drawing? (some? path-bar-state)))`.
+   **`path-editing?` semantics were deliberately left unchanged** (it drives `on-pointer-down`
+   routing, path-editor rendering, `show-measures?`/`show-snap-points?`, etc.), so only the
+   bar gate is affected. During creation the node-editing buttons are disabled (empty
+   selection), "Draw nodes" shows toggled, and the snap toggle is live. Limitation: the
+   "Move nodes" button is a no-op mid-creation because `change-edit-mode` keys on
+   `:edition` (nil during creation) — acceptable, draw is the only meaningful mode before
+   the shape is committed. Verified live (WASM viewport, real pointer gestures): picked the
+   Path tool, placed two nodes → the bar rendered with "Draw nodes" toggled and "Snap
+   nodes" enabled; clicking snap flipped `:snap-toggled` (button `is-toggled` false→true);
+   exiting cleared the bar (no leftover). `cljfmt` clean, `clj-kondo` 0/0, main build `:ok`.
+   **Polish (2026-07-13, uncommitted): collapse the main toolbar during creation.**
+   The top toolbar (`top_toolbar.cljs`) and the path edition bar are both centered at the
+   top, so they overlapped while drawing a new path. `top_toolbar/toolbar-hidden-ref`
+   already collapsed the toolbar for existing-path editing (`is-path-editing`, keyed on
+   `:edition` + single selection), but during creation `:edition` is nil and the edit
+   state is keyed by the in-progress drawing object id, so the toolbar stayed expanded.
+   The ref now derives from `st/state` (was `refs/workspace-local`) and adds
+   `is-path-drawing` — `edition` nil and edit state present for `pst/get-path-id state`
+   (which prefers `[:workspace-drawing :object :id]`); it self-gates because `:edit-path`
+   only holds entries for paths, so a plain rect draw is unaffected. Toolbar collapses to
+   its thin strip (same animation as existing-path editing) in both cases; the
+   `:hide-toolbar` user preference is still respected otherwise. `cljfmt` clean,
+   `clj-kondo` 0/0, main build `:ok`; REPL-verified the ref returns hidden for
+   creation/editing and respects the preference for a rect draw / idle.
+
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`

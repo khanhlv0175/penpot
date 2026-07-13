@@ -301,6 +301,15 @@
                               (path/convert-to-path editing-shape base-objects)
                               editing-shape))
 
+        ;; The path edition top bar is shown while editing an existing path
+        ;; (keyed by :edition) and while drawing a new one (keyed by the
+        ;; in-progress drawing object id), so node snap can be toggled during
+        ;; creation.
+        path-bar-state    (or edit-path-state
+                              (when path-drawing?
+                                (get edit-path (get drawing-obj :id))))
+        path-bar-shape    (or editing-shape drawing-obj)
+
         create-comment?   (= :comments drawing-tool)
 
         text-editing?     (cfh/text-shape? editing-shape)
@@ -662,10 +671,10 @@
         (when-not hide-ui?
           [:> top-toolbar* {:layout layout}])
 
-        (when (and ^boolean path-editing?
-                   ^boolean single-select?)
-          [:> path-edition-bar* {:shape editing-shape
-                                 :edit-path-state edit-path-state
+        (when (or (and ^boolean path-editing? ^boolean single-select?)
+                  (and ^boolean path-drawing? (some? path-bar-state)))
+          [:> path-edition-bar* {:shape path-bar-shape
+                                 :edit-path-state path-bar-state
                                  :layout layout}])
 
         (when (and ^boolean grid-editing?

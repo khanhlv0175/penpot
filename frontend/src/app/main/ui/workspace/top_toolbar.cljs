@@ -16,6 +16,7 @@
    [app.main.data.workspace.drawing.common :as dwdc]
    [app.main.data.workspace.mcp :as mcp]
    [app.main.data.workspace.media :as dwm]
+   [app.main.data.workspace.path.state :as pst]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.features :as features]
    [app.main.refs :as refs]
@@ -34,16 +35,22 @@
 
 (def ^:private toolbar-hidden-ref
   (l/derived (fn [state]
-               (let [visibility      (get state :hide-toolbar)
-                     path-edit-state (get state :edit-path)
-                     selected        (get state :selected)
-                     edition         (get state :edition)
+               (let [visibility      (get-in state [:workspace-local :hide-toolbar])
+                     path-edit-state (get-in state [:workspace-local :edit-path])
+                     selected        (get-in state [:workspace-local :selected])
+                     edition         (get-in state [:workspace-local :edition])
+                     path-id         (pst/get-path-id state)
 
                      is-single       (= (count selected) 1)
-                     is-path-editing (and is-single (some? (get path-edit-state edition)))]
+                     ;; The path edition bar takes the toolbar's spot both while
+                     ;; editing an existing path (keyed by :edition) and while
+                     ;; drawing a new one (keyed by the in-progress drawing
+                     ;; object id), so collapse the toolbar in both cases.
+                     is-path-editing (and is-single (some? (get path-edit-state edition)))
+                     is-path-drawing (and (nil? edition) (some? (get path-edit-state path-id)))]
 
-                 (if is-path-editing true visibility)))
-             refs/workspace-local))
+                 (if (or is-path-editing is-path-drawing) true visibility)))
+             st/state))
 
 (def grouped-tools
   {:shapes {:default-tool :rect
