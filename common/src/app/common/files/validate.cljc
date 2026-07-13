@@ -588,6 +588,7 @@
                                   (str/ffmt "Variant % has invalid properties %" (:id child) (vec prop-names))
                                   child file page))))))
           shapes)))
+
 (defn- check-variant
   "Shape is a variant, so
      -it should be a main component
@@ -623,7 +624,8 @@
     (when-not (= (:variant-id component) (:variant-id shape))
       (report-error :variant-component-bad-id
                     (str/ffmt "Variant % has adifferent variant-id than its component" (:id shape))
-                    shape file page))))
+                    shape file page
+                    :variant-id (:variant-id component)))))
 
 (defn- check-shape
   "Validate referential integrity and semantic coherence of

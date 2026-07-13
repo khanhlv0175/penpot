@@ -18,19 +18,21 @@
    [app.common.test-helpers.ids-map :as thi]
    [app.common.test-helpers.shapes :as ths]
    [app.common.test-helpers.variants :as thv]
+   [app.common.uuid :as uuid]
    [clojure.test :as t]))
 
 (t/use-fixtures :each thi/test-fixture)
 
 (t/deftest repair-not-a-variant
-  (t/testing "detect and repair a variant component whose root shape is not a variant"
+  (t/testing "detect and repair a variant component whose root shape is not a variant, but has a variant-name"
     (let [file    (-> (thf/sample-file :file1 :page-label :page1)
                       (thv/add-variant :variant1 :component1 :root1 :component2 :root2)
-                      (ths/update-shape :root1 :variant-id nil))
+                      (ths/update-shape :root1 :variant-id nil)
+                      (ths/update-shape :root1 :variant-name "ValueXX"))
 
           errors  (cfv/validate-file file {})
           changes (cfr/repair-file file {} errors)
-          file'   (thf/apply-changes file {:redo-changes changes} :valdate? false)
+          file'   (thf/apply-changes file {:redo-changes changes} :validate? false)
           errors' (cfv/validate-file file' {})
 
           root1'  (ths/get-shape file' :root1 :page-label :page1)]
@@ -39,6 +41,45 @@
       (t/is (= :not-a-variant (:code (first errors))))
 
       (t/is (nil? errors'))
+      (t/is (= (thi/id :variant1) (:variant-id root1')))
+      (t/is (= "ValueXX" (:variant-name root1'))))))
+  
+(t/deftest repair-invalid-variant-id-variant-component-bad-id
+  (t/testing "detect and repair a variant component whose variant id does not match the container's id"
+    (let [file    (-> (thf/sample-file :file1 :page-label :page1)
+                      (thv/add-variant :variant1 :component1 :root1 :component2 :root2)
+                      (ths/update-shape :root1 :variant-id (uuid/next)))
+
+          errors  (cfv/validate-file file {})
+          changes (cfr/repair-file file {} errors)
+          file'   (thf/apply-changes file {:redo-changes changes} :validate? false)
+          errors' (cfv/validate-file file' {})
+
+          root1'  (ths/get-shape file' :root1 :page-label :page1)]
+
+      (t/is (= 2 (count errors)))  ;; There are two different validation that actually check the same problem
+      (t/is (= :invalid-variant-id (:code (first errors))))
+      (t/is (= :variant-component-bad-id (:code (second errors))))
+
+      (t/is (nil? errors'))
       (t/is (= (thi/id :variant1) (:variant-id root1'))))))
-  
-  
+
+(t/deftest repair-invalid-variant-properties
+  (t/testing "detect and repair a variant component whose variant id does not match the container's id"
+    (let [file    (-> (thf/sample-file :file1 :page-label :page1)
+                      (thv/add-variant :variant1 :component1 :root1 :component2 :root2)
+                      (ths/update-shape :root1 :variant-id (uuid/next)))
+
+          errors  (cfv/validate-file file {})
+          changes (cfr/repair-file file {} errors)
+          file'   (thf/apply-changes file {:redo-changes changes} :validate? false)
+          errors' (cfv/validate-file file' {})
+
+          root1'  (ths/get-shape file' :root1 :page-label :page1)]
+
+      (t/is (= 2 (count errors)))
+      (t/is (= :invalid-variant-id (:code (first errors))))
+      (t/is (= :variant-component-bad-id (:code (second errors))))
+
+      (t/is (nil? errors'))
+      (t/is (= (thi/id :variant1) (:variant-id root1')))))) 
