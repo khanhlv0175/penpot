@@ -797,10 +797,23 @@ Work planned on top of the polished editor, with required groundwork:
    `tools`→`dwe/helpers/state/path`, none lead back to `path.edition`). Test
    `dragging-a-node-or-segment-onto-another-merges-them` (node near ⇒ weld; segment
    endpoint near ⇒ weld; far ⇒ no-op); frontend suite 36/94.
-- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
-   Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
-   single canonical stop path, and document or replace the load-bearing
-   `rx/observe-on :async` / `rx/delay 0` boundaries (see §3). Not started.
+- [x] **Refactor — make the edition stop model explicit + document deferred ordering.**
+   Completed 2026-07-13. **Scope note:** `clear-edition-mode` is *already* the single
+   canonical stop (bugs 1/5/7 routed the exit watcher, `finish-edition?`, and most keying
+   onto `::dwe/clear-edition-mode`). A literal collapse to one event was deliberately **not**
+   done — the remaining signals encode genuinely distinct, deliberately-designed behaviors
+   (each a bug fix): `:interrupt` must end the loop *directly* during initial creation
+   because no `:edition` exists yet to funnel it through `clear-edition-mode`; `finish-path`
+   is restart+cleanup; `esc-pressed` has four context-dependent meanings (bug 11 UX).
+   Collapsing them would regress. Instead, behavior-preserving: (1) restructured the draw-loop
+   predicates into an explicit taxonomy — `end-path-event? = restart-draw-loop? ∪
+   exit-draw-loop?` (new `exit-draw-loop?`), removing the duplicated finish-path/double-click
+   literals, and `(= event :interrupt)` → `(dwe/interrupt? event)`; (2) documented the model
+   in a doc block above the predicates and in `finish-edition?`/`esc-pressed` docstrings
+   (esc-pressed's 4-way translation table is now spelled out); (3) documented both
+   load-bearing async boundaries in-code (`rx/observe-on :async` in `handle-drawing`,
+   `rx/delay 0` in `handle-finish-drawing`). Zero behavior change: all five escape/interrupt/
+   restart tests plus the full focused suite (36/94) green; lint/format clean; build `:ok`.
 
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete.
@@ -809,8 +822,7 @@ for features 1–3, 8, 10, and 11 is complete.
 
 - All numbered features are done or dropped (features 4 and 5 dropped by user decision);
   none remain.
-- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit**
-  (see §6 entry above).
+- The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences
   for node drag, handler drag, arrows, tool ops, path-local undo/redo, Esc, double-click,
   and draw↔move switching, plus a by-hand devenv pass over the full workflow (pen draw,

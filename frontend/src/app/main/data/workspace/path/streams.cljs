@@ -25,7 +25,11 @@
   (fn [current]
     (>= (gpt/distance start current) (/ drag-threshold zoom))))
 
-(defn finish-edition? [event]
+(defn finish-edition?
+  "True for the canonical `clear-edition-mode` stop event. The path drag streams
+  stop on it in addition to the generic `mse/drag-stopper`, so any in-progress
+  node/handler/segment drag ends the moment edition is torn down."
+  [event]
   (= (ptk/type event) ::dwe/clear-edition-mode))
 
 (defn to-pixel-snap [position]

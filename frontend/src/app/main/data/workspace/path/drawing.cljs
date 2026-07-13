@@ -43,24 +43,43 @@
              (edition/start-path-edit id)
              (change-edit-mode :draw)))))
 
-(defn- end-path-event?
-  [event]
-  (let [type (ptk/type event)]
-    (or
-     (= type ::common/finish-path)
-     (= type ::dwe/clear-edition-mode)
-     (= type ::dwpg/finalize-page)
-     (= event :interrupt) ;; ESC
-     (and ^boolean (mse/mouse-event? event)
-          ^boolean (mse/mouse-double-click-event? event)))))
+;; --- Draw-loop stop / restart signals
+;;
+;; The draw loop (`start-edition`) runs until one of a small set of events
+;; arrives. They fall into two kinds:
+;;
+;; - restart: end the loop and immediately re-enter continued edition on the
+;;   same shape (an explicit finish via Enter / Esc-while-creating, or a
+;;   double-click). `handle-drawing-end` threads this through as `:restart?`.
+;; - exit: end the loop for good. `clear-edition-mode` is the canonical
+;;   "edition ended" signal — `:interrupt` (Esc with nothing pending) funnels
+;;   into it through `start-edition-mode`'s watch once an `:edition` exists, but
+;;   during initial creation there is no `:edition` yet, so the bare `:interrupt`
+;;   (and `finalize-page` on navigation) must also end the loop directly.
+;;
+;; `end-path-event?` is the union of the two.
 
 (defn restart-draw-loop?
+  "True for the events that end the draw loop and re-enter continued edition on
+  the same shape."
+  [event]
+  (or (= (ptk/type event) ::common/finish-path)
+      (and ^boolean (mse/mouse-event? event)
+           ^boolean (mse/mouse-double-click-event? event))))
+
+(defn- exit-draw-loop?
+  "True for the events that end the draw loop for good (no re-entry)."
   [event]
   (let [type (ptk/type event)]
-    (or
-     (= type ::common/finish-path)
-     (and ^boolean (mse/mouse-event? event)
-          ^boolean (mse/mouse-double-click-event? event)))))
+    (or (= type ::dwe/clear-edition-mode)   ;; canonical "edition ended"
+        (= type ::dwpg/finalize-page)       ;; page navigation / teardown
+        (dwe/interrupt? event))))           ;; Esc during initial creation
+
+(defn- end-path-event?
+  "Any reason the draw loop must end — a restart or an exit."
+  [event]
+  (or (restart-draw-loop? event)
+      (exit-draw-loop? event)))
 
 (defn preview-next-point
   [{:keys [x y shift?]}]
@@ -385,6 +404,12 @@
          (->> stream
               (rx/filter (ptk/type? ::end-edition))
               (rx/take 1)
+              ;; Load-bearing boundary: the draw loop ends synchronously inside
+              ;; the cascade of its stop event (e.g. Esc's `:interrupt`).
+              ;; Deferring `handle-drawing-end` to the next microtask (`:async`)
+              ;; lets that cascade fully settle first, so a non-restart exit
+              ;; tears the shape down instead of re-entering a live draw loop off
+              ;; stale `:last-point`/preview state (bug 11, second pass).
               (rx/observe-on :async)
               (rx/map (fn [event]
                         (handle-drawing-end shape-id (:restart? (deref event)))))))))))

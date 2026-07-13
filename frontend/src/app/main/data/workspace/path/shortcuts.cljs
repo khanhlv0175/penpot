@@ -21,24 +21,30 @@
 
 ;; Shortcuts format https://github.com/ccampbell/mousetrap
 
-(defn esc-pressed []
+(defn esc-pressed
+  "Translates Escape into the right editor stop signal for the current context.
+  Escape means four different things depending on state, so this is the single
+  place that maps it onto the stop model:
+
+  - add-nodes toggle on  -> just turn the toggle off, keep the editor open;
+  - pending segment, no `:edition` (a path still being created) -> `finish-path`,
+    which creates the shape and continues its edition (a restart);
+  - pending segment during edition -> `cancel-pending-segment`, dropping the
+    in-progress segment without stopping the draw loop;
+  - nothing pending -> `:interrupt`, the generic exit that funnels into the
+    canonical `clear-edition-mode`."
+  []
   (ptk/reify ::esc-pressed
     ptk/WatchEvent
     (watch [_ state _]
-      ;; While drawing a segment, escape only cancels it and keeps the
-      ;; editor in draw mode; without one it exits the edition.
       (let [id        (drp.state/get-path-id state)
             pending?  (some? (get-in state [:workspace-local :edit-path id :last-point]))
             add-nodes? (get-in state [:workspace-local :edit-path id :add-nodes])
             edition   (get-in state [:workspace-local :edition])]
         (cond
-          ;; While the add-nodes state is active, escape only turns it off and
-          ;; keeps the editor open.
           add-nodes?
           (rx/of (drp/set-add-nodes false))
 
-          ;; A path still being created: finishing it creates the shape
-          ;; and continues its edition in draw mode
           (and pending? (nil? edition))
           (rx/of (drp.common/finish-path))
 

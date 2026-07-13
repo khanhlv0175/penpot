@@ -105,6 +105,8 @@
                  (rx/of (dwu/commit-undo-transaction (:id shape))))
                 (rx/empty)))))
 
-         ;; Delay so the mouse event can read the drawing state
+         ;; Load-bearing boundary: defer `clear-drawing` by a tick so the
+         ;; in-flight mouse event that triggered the finish can still read the
+         ;; drawing state before it is torn down.
          (->> (rx/of (clear-drawing {:preserve-tool? (= tool :curve)}))
               (rx/delay 0)))))))
