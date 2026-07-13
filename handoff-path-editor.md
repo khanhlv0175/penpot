@@ -349,6 +349,12 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   `…L389,214Z`; a multi-subpath icon closes each of its 3 coincident loops
   independently, preserving a `curve-to` ending before its `Z`; genuinely open paths are
   left unchanged.
+- [ ] **Bug 13 — make-curve can curve adjacent nodes.** Converting a node to a curve
+  (make-curve) sometimes also curves the neighbouring node(s); only the targeted node(s)
+  should ever change. Suspect the position-based collapse at the common-fn boundary
+  (handler grouping / duplicate-coordinate ambiguity noted in the branch review, §12) or a
+  mis-scoped handler write in `process-path-tool` make-curve. It must never affect adjacent
+  nodes.
 
 ## 6. Refactors and features checklist
 
@@ -631,11 +637,55 @@ Work planned on top of the polished editor, with required groundwork:
    `clj-kondo` 0/0, main build `:ok`; REPL-verified the ref returns hidden for
    creation/editing and respects the preference for a rect draw / idle.
 
+- [ ] **Feature 16 — insert a node by clicking a segment (recover the insertion preview).**
+   Clicking the middle of a segment should split it and create a node at the click point,
+   with a live preview of the node to be added while the pointer hovers the segment. This
+   was disabled temporarily for feature 1 (segment selection): `create-node-at-position`
+   still exists with split params in the point metadata (§2), but the editor no longer
+   renders the insertion preview or invokes it, and segment clicks currently select the
+   segment instead. Re-enable the preview + click-to-insert and reconcile it with segment
+   selection (likely gated behind feature 17's "add node" mode).
+- [ ] **Feature 17 — "add node" mode (shortcut `p`, toolbar toggle).** A dedicated editor
+   mode that recovers the full add-node-while-hovering behaviour (feature 16's preview +
+   click-to-insert). Toggled on by pressing `p` or by a new toolbar icon in the path
+   edition bar (`path_actions.cljs`), and off again by Escape or the same menu toggle.
+   Model it on the existing `:draw`/`:move` edit modes (`:edit-mode` in the ephemeral edit
+   state) and the `toggle-snap` toolbar pattern.
+- [ ] **Feature 18 — default path stroke alignment to center.** New paths should be created
+   with a centered stroke; every other shape type keeps the current inside (`:inner`)
+   default. Scope the changed default to path creation only.
+- [ ] **Feature 19 — Alt toggles handler join in both directions.** Today, holding Alt
+   while dragging a joined (mirrored) handler breaks the pair so the two move
+   independently. Add the reverse: holding Alt while dragging an already-independent
+   handler re-joins the pair (restores mirrored / opposite-angle movement). Lives in the
+   handler-drag pipeline (`move-handler-stream` / `modify-handler`, opposite-angle
+   matching).
+- [ ] **Feature 20 — move handlers while drawing/creating a path.** During draw mode (not
+   only move mode) the user should be able to grab and drag the Bézier handlers of
+   already-placed nodes.
+
 **Groundwork conclusions:** the stable index identity and unified selection prerequisite
 for features 1–3, 8, 10, and 11 is complete. Feature 4 can reuse the same node identity,
 and its fillet geometry can build on `helpers/fit-cubic`/`fit-curve`
 (`common/src/app/common/types/path/helpers.cljc`), landed with features 7 and 6.
-Remaining roadmap item: 4.
+
+**Remaining work:**
+
+- [ ] **Open features** (see §6 entries above): 4 (round corners), 16 (insert node on
+  segment click + recover insertion preview), 17 ("add node" mode: `p` / toolbar / Escape),
+  18 (default path stroke to center), 19 (Alt toggles handler join both ways), 20 (move
+  handlers while drawing).
+- [ ] **Bug 13 — make-curve can curve adjacent nodes** (see §5).
+- [ ] **Refactor — unify edition stop signals and make deferred ordering explicit.**
+  Replace the `esc-pressed`/`:interrupt`/`clear-edition-mode`/`finish-path` split with a
+  single canonical stop path, and document or replace the load-bearing
+  `rx/observe-on :async` / `rx/delay 0` boundaries (see §3). Not started.
+- [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences
+  for node drag, handler drag, arrows, tool ops, path-local undo/redo, Esc, double-click,
+  and draw↔move switching, plus a by-hand devenv pass over the full workflow (pen draw,
+  close path, drags, rubber band, arrows, undo, and the Esc/double-click/toolbar exits).
+  Playwright recipes: Serena memory `frontend/playwright-gestures`; crash detection:
+  `frontend/handling-crashes`.
 
 ## 7. Testing status
 
@@ -729,8 +779,8 @@ Validation for segment/handler selection and grouped movement on 2026-07-10:
   both endpoints plus their anchored/shared handlers.
 - Main CLJS compiler output: `:ok`; all touched CLJS delimiters balanced.
 - `pnpm run lint:clj`: 0 errors, 0 warnings; `pnpm run check-fmt:clj`: clean.
-- Real pointer gestures were not re-run in this pass; the remaining manual checklist in
-  §8 still applies.
+- Real pointer gestures were not re-run in this pass; by-hand verification remains part
+  of the outstanding testing work (see §6 "Remaining work").
 
 Validation for feature 7 (remove node with curve approximation) on 2026-07-11:
 
@@ -781,55 +831,15 @@ Validation for feature 6 (curve-tool smoothing) on 2026-07-11:
   so even throttled sampling collects enough points. Root-owned `.clj-kondo` cache for
   the clipboard namespace also had to be deleted (same root-run-build cause as above).
 
-## 8. Suggested plan
-
-Ordered to serve the roadmap in §6:
-
-- [x] **Drawing-state isolation and one final persistent update.** Includes existing
-  shapes, newly created paths, unchanged simple-shape preservation, deferred empty-path
-  removal, viewport rendering, and initial lifecycle tests.
-- [x] **Run the focused frontend unit namespace in a prepared environment.** Done
-  2026-07-10 inside the devenv container (host pnpm install is unusable):
-  `pnpm run test:quiet -- --focus frontend-tests.logic.path-edition-test --log-level warn`.
-- [ ] **Expand the store-driven safety net.** Add pointer sequences for node drag,
-  handler drag, arrows, tool operations, path-local undo/redo, Esc, double-click, and
-  switching draw↔move.
-- [x] **Fix stale clear-edition event matching (bug 1).** Use the
-  `workspace.edition` event keyword consistently in path stream stoppers and draw-loop
-  termination.
-- [x] **Fix post-update cleanup ordering (bug 3).** Capture the active path id before
-  removing `:edition`, emit `finish-path` with `rx/of`, and emit nothing for non-path
-  edition.
-- [ ] **Unify edition stop signals and make deferred ordering explicit.** Replace the
-  esc-pressed/`:interrupt`/clear-edition-mode/finish-path split and document or replace
-  the load-bearing `observe-on :async` / `delay 0` boundaries.
-- [x] **Introduce stable node/segment/handler identity and a unified selection model.**
-  Done for **nodes** (2026-07-10): selection/hover are content-command-index based,
-  rendering iterates by index, moves keep indices (no remap), structural tools remap once
-  via `helpers/remap-selected-nodes`; `:selected-segments`/`:selected-handlers` +
-  `helpers/{node-indices,node-position,node-positions,nodes-in-rect,remap-selected-nodes}`
-  were extended with segment/handler click, Shift+click, marquee selection, rendering,
-  and grouped handler movement. Live-verified groundwork: node click/shift/rubber-band,
-  node drag (index stable), make-curve (selection kept), remove-node (selection remapped),
-  and arrow move. Store tests cover the new cross-type selection and handler movement.
-  Pushing indices into the common tool fns remains an optional follow-up.
-- [ ] **Implement roadmap features.** Geometry-heavy features can proceed alongside
-  structural work; share one bezier-fitting utility between smoothing and
-  remove-with-approximation.
-- [ ] **Verify the full workflow by hand in devenv.** Pen tool draw, close path,
-  node/handler drag, rubber band, arrows, undo, Esc/double-click/toolbar exits, and
-  switching draw↔move. Playwright gesture recipes: Serena memory
-  `frontend/playwright-gestures`. Crash detection via cljs REPL:
-  `frontend/handling-crashes`.
-
-## 9. Context for the new session
+## 8. Context for the new session
 
 - Activate Serena project `penpot`; read `critical-info` and `frontend/core` memories.
 - Read this handoff before source exploration; it is the cross-session source of truth.
   Serena memory `frontend/path-editor-architecture-and-event-ordering` contains the
   original investigation and may lag this document.
-- At the 2026-07-10 handoff, work is on `piweek-path-editor-enhancements` and is
-  uncommitted. Inspect `git status` and the full diff before continuing.
+- Work lives on `piweek-path-editor-enhancements`; some of it is uncommitted. Inspect
+  `git status` and the full diff before continuing (don't assume the tree matches this
+  document).
 - Key invariant: while `[:workspace-local :edit-path id]` exists, path content belongs
   to `[:workspace-drawing :object]`; file objects must remain unchanged until
   `finalize-path-content` runs. A new path must enter continued edition through
@@ -845,7 +855,7 @@ Ordered to serve the roadmap in §6:
   `tools/paren-repair.bb` first if delimiter errors are suspected. Commit only when
   explicitly asked.
 
-## 10. Stable node identity refactor (completed 2026-07-10, commit `6f03049135`)
+## 9. Stable node identity refactor (completed 2026-07-10, commit `6f03049135`)
 
 Groundwork for roadmap features 1–3 and 8. Replaces position-based node identity with stable
 content-command indices and scaffolds a unified node/segment/handler selection model.
@@ -913,7 +923,7 @@ Segment + handler click/Shift+click/marquee selection, grouped handler movement,
 segment hit-testing/rendering are now implemented. The optional follow-up is to push
 indices into the remaining position-based common tool functions.
 
-## 11. Segment and handler selection implementation (2026-07-10, uncommitted)
+## 10. Segment and handler selection implementation (2026-07-10, uncommitted)
 
 - `helpers.cljs`: `segment-entries`, endpoint-node identities, polyline rect intersection
   for line/curve/closing segments, and visible-handler entries/containment.
@@ -929,7 +939,7 @@ indices into the remaining position-based common tool functions.
 - `path_edition_test.cljs`: state-level selection, marquee, grouped-handler movement,
   and segment movement coverage. Focused suite result: 20 tests / 51 assertions.
 
-## 12. Branch self-review fixes (2026-07-10, committed)
+## 11. Branch self-review fixes (2026-07-10, committed)
 
 A full self-review of the branch against `origin/develop` found five issues, all fixed:
 
@@ -964,7 +974,7 @@ Regression tests added for all five (`cancel-pending-segment-drops-dangling-subp
 62 assertions, 0 failures (devenv container). `lint:clj` 0/0, `check-fmt:clj` clean,
 main build `:ok`.
 
-## 13. Branch review — correctness & performance pass (2026-07-11)
+## 12. Branch review — correctness & performance pass (2026-07-11)
 
 Full re-review of the branch (committed work incl. copy/paste `8f17e6ad82` and marquee
 priority `412d98c609`, plus the uncommitted features 6/7 common-layer work) and of every
@@ -1003,7 +1013,7 @@ Performance observations (no action needed yet; relevant for very large paths):
 - Marquee hit-testing is already frame-throttled (16 ms); `segments-in-rect` flattens
   curves per tick, which is fine at that rate.
 
-## 14. Maybe — ideas worth considering (not committed)
+## 13. Maybe — ideas worth considering (not committed)
 
 A parking lot for things that might be worth doing but haven't been decided. Each entry
 records the trade-off, not a plan; promote to a numbered bug/feature only once decided.
