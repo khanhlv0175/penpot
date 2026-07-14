@@ -1,6 +1,6 @@
 # Handoff: Path editor investigation (event ordering / polishing)
 
-Initial investigation: 2026-07-02. Last updated: 2026-07-11. Goal: polish the path
+Initial investigation: 2026-07-02. Last updated: 2026-07-14. Goal: polish the path
 (pen tool) editor; several event-ordering problems cause unexpected results. This
 document is the source of truth for work between sessions. A copy of the original
 findings also lives in Serena memory
@@ -349,6 +349,23 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   `…L389,214Z`; a multi-subpath icon closes each of its 3 coincident loops
   independently, preserving a `curve-to` ending before its `Z`; genuinely open paths are
   left unchanged.
+  **Reopened + fixed 2026-07-14 — editor view now shows the join.** The *persisted* shape
+  closed correctly, but **while the path was being edited** the seam still rendered open
+  (two butt caps / no join); it only displayed correctly after exiting edition. Root cause:
+  during draw/edit both viewports render the drawing copy's fill/stroke through
+  `drawarea/draw-area*` → `shapes/shape-wrapper` (SVG), and that copy is deliberately kept
+  **line-closed** (a trailing line-to back to the subpath start, no `:close-path`) so the
+  editor's per-node/segment interaction on the closing seam keeps working — so the SVG
+  stroke drew two butt caps at the seam. Fix (`viewport/drawarea.cljs`, renderer-agnostic —
+  both viewports route through it): `draw-area*` now close-loops (`path/close-loops`) the
+  path content of **only the rendered copy** it passes to `shape-wrapper`; the editor
+  overlay (`path-editor*`) still receives the raw line-closed content, so interaction is
+  unchanged. The close is recomputed per render, so dragging endpoints apart re-opens the
+  path live, and open paths are untouched. Verified live (WASM viewport, real gestures): a
+  line-closed triangle with a 24px center stroke rendered a butt-cap notch at the seam in
+  the normal render, and a clean miter join at the same vertex once in edit mode; exiting
+  with no change left the stored content line-closed (fix is render-only, no shape
+  mutation). Compiler `:ok`, `clj-kondo` 0/0, `cljfmt` clean.
 - [x] **Bug 13 — make-curve can curve adjacent nodes.** Fixed 2026-07-13. Root cause was in
   `common.types.path.segment/make-curve-point`: its normal branch (a node with two distinct
   neighbours, `count = 2`) correctly gives only the target node handles and keeps each
@@ -365,6 +382,16 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   (e.g. endpoint → `c1=(33.3,0)`, `c2=(100,0)` coincident). New test
   `segment-make-curve-point-keeps-neighbors-corners`; full common suite 1100 tests / 24570
   assertions, 0 failures; `cljfmt`/`clj-kondo` clean.
+- [ ] **Bug 14 — path with no fills inside an SVG group defaults to black, not
+  transparent.** When a path lives inside an imported SVG group and has no `:fills`, it
+  renders **black** instead of transparent (SVG's `fill: black` default leaking through
+  instead of Penpot's no-fill = transparent). The fill fallback must be transparent for a
+  no-fill path. **This is also broken during path edition** (item requested 2026-07-14):
+  entering edition on such a path does not correct the fill, so the editor shows a black
+  body. Investigate the render fallback for no-fill paths (classic + WASM) and the
+  SVG-import fill defaulting; ensure the editor drawing copy inherits the same no-fill →
+  transparent behaviour. (Base defaulting may predate this branch; the editor part is
+  new.)
 
 ## 6. Refactors and features checklist
 
@@ -797,6 +824,61 @@ Work planned on top of the polished editor, with required groundwork:
    `tools`→`dwe/helpers/state/path`, none lead back to `path.edition`). Test
    `dragging-a-node-or-segment-onto-another-merges-them` (node near ⇒ weld; segment
    endpoint near ⇒ weld; far ⇒ no-op); frontend suite 36/94.
+- [ ] **Feature 25 — half-pixel node movement at high zoom (> 300%).** Node positions are
+   quantised to whole pixels by the move pipeline. When the viewport zoom exceeds a
+   threshold (~300%), allow half-pixel (0.5) increments so fine editing is possible when
+   zoomed in; below the threshold keep whole-pixel snapping. Applies to node drags (and
+   likely arrow nudges). Pointer: pixel snapping lives in `streams.cljs` (the pixel-snap
+   step in `move-points-stream`) — gate the quantisation on current zoom (from `refs`/the
+   viewport) so the step becomes 0.5 above the threshold, 1 below.
+- [ ] **Feature 26 — disable pixel snapping for handler movement.** Bézier handler drags
+   should not snap to the pixel grid at all (handles need sub-pixel freedom). Drop the
+   pixel-snap step for handlers only in `move-handler-stream`; object/path snapping and node
+   pixel snapping are unaffected.
+- [ ] **Feature 27 — alignment / distribute options for path nodes.** The align
+   (left/center/right/top/middle/bottom) and distribute (horizontal/vertical) actions should
+   operate on the **selected path nodes** during path edition, aligning/distributing node
+   positions instead of whole shapes. Branch the alignment/distribute actions on path
+   edition: resolve selected `:nodes` → positions, compute the same align/distribute math,
+   and write back through the content-modifier / `process-path-tool` pipeline. Surfaced by
+   feature 28 (the options panel must show these controls during edition).
+- [ ] **Feature 28 — right options panel content during path editing.** The right-side
+   options menu currently shows nothing while editing a path. It should **hide** boolean
+   options, layout, and export; and **show** the distribute/alignment options (feature 27),
+   measurements, fill, stroke, shadow, and blur. Pointer: the options component
+   (`ui/workspace/sidebar/options.cljs` + shape-specific options menus) gates sections per
+   shape/selection — add a path-edition branch that renders exactly this subset.
+- [ ] **Feature 29 — visual (arc-length) half-point for mid-segment node insertion.**
+   Feature 16 inserts at the Bézier parameter `t = 0.5`, but for many curves that is **not**
+   the visual midpoint. Replace the t=0.5 midpoint (`helpers/segment-mid-point` and the
+   `:t 0.5` split meta) with an arc-length midpoint: flatten/subdivide the curve, accumulate
+   chord lengths, and solve for the `t` where cumulative length reaches half the total; feed
+   that `t` into `create-node-at-position`/`split-segments`. Lines are unaffected (t=0.5 is
+   already their visual middle).
+- [ ] **Feature 30 — segment-targeted operations (flip, delete, merge).** With a **segment**
+   selection: (a) **Shift+H / Shift+V** should flip the segment's endpoint nodes (extend
+   feature 11's `flip-content` to include segment-endpoint nodes); (b) **Delete** should
+   remove the selected segment(s) — today Delete only acts on `:nodes` (see the §12 UX gap);
+   (c) **merge-nodes** should work from a segment selection (merge the segment's two endpoint
+   nodes). Relax `path_actions/check-enabled` and the Delete shortcut to consider
+   `:segments`, and route the operations through the existing `process-path-tool` fns.
+- [ ] **Feature 31 — temporary 80% fill opacity while editing a path.** While a path is in
+   edition, render its fills at 80% opacity so the user can see elements behind it (an opaque
+   edited path otherwise hides background content). Temporary/visual only — must **not**
+   persist to the shape's real `:fills`. Apply to the drawing-copy render in both viewports
+   (classic + WASM); restore on exit.
+- [ ] **Feature 32 — snap-to-node on by default when creating / editing a path.** The node
+   snap toggle (`:snap-toggled`) should default **on** for both new-path creation and
+   existing-path edition (initialise it where `start-edition` / `start-path-edit` set up the
+   edit state). Feature 15 already surfaces the toggle mid-draw; this only flips the initial
+   value.
+- [ ] **Feature 33 — duplicate nodes & segments (Ctrl+D, Alt+drag).** `Ctrl+D` duplicates
+   the current selection: a **segment** duplicates exactly like copy/paste of a segment
+   (reuse feature 2's `extract-content`/`splice-content` + the paste offset); a **node**
+   duplicates into a new node carrying the same segment properties (handles/curve) as the
+   duplicated one. **Alt+drag** on a node or segment also duplicates (drop a copy, drag the
+   duplicate away) — branch the drag pipeline in `edition.cljs` on the Alt modifier at
+   drag-confirm to splice a duplicate before moving.
 - [x] **Refactor — make the edition stop model explicit + document deferred ordering.**
    Completed 2026-07-13. **Scope note:** `clear-edition-mode` is *already* the single
    canonical stop (bugs 1/5/7 routed the exit watcher, `finish-edition?`, and most keying
@@ -820,15 +902,23 @@ for features 1–3, 8, 10, and 11 is complete.
 
 **Remaining work:**
 
-- All numbered features are done or dropped (features 4 and 5 dropped by user decision);
-  none remain.
+- Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
+- **New batch requested 2026-07-14 — not yet started:** features 25–33 (half-pixel nodes at
+  high zoom, no handler pixel-snap, node alignment/distribute, path-edition options panel,
+  arc-length half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
+  snap-on-by-default, Ctrl+D / Alt+drag duplicate), plus **Bug 14** (no-fill path in an SVG
+  group renders black, also while editing). See §5/§6 for each. **Bug 12 reopened is fixed**
+  (2026-07-14, editor now close-loops the rendered drawing copy — see §5).
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
-- [ ] **Testing — expand the store-driven safety net** (see §7). Add pointer sequences
-  for node drag, handler drag, arrows, tool ops, path-local undo/redo, Esc, double-click,
-  and draw↔move switching, plus a by-hand devenv pass over the full workflow (pen draw,
+- **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
+  undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of
+  the existing selection/marquee/modifier/arrow/paste/merge/lifecycle tests (now 40/106).
+  Remaining, and blocked at the unit level (documented in §7): true pointer-stream drag
+  simulation and the auto-capture undo watcher both depend on the *global* `ms/mouse-position`
+  / `store/state`, so they need the **live-gesture layer** — a small Playwright spec for
+  draw-path + node-drag (recipes: Serena memory `frontend/playwright-gestures`; crashes:
+  `frontend/handling-crashes`), plus a by-hand devenv pass over the full workflow (pen draw,
   close path, drags, rubber band, arrows, undo, and the Esc/double-click/toolbar exits).
-  Playwright recipes: Serena memory `frontend/playwright-gestures`; crash detection:
-  `frontend/handling-crashes`.
 
 ## 7. Testing status
 
@@ -839,14 +929,23 @@ Continue growing the safety net alongside refactors. Current coverage:
   New geometry (extract/splice, fillet, bezier fit, remove-with-approximation) should
   land here as pure-function tests — cheapest and most valuable.
 - **Frontend event layer**: `frontend/test/frontend_tests/logic/path_edition_test.cljs`
-  now covers drawing-copy isolation, unchanged simple-shape exit, changed-content
-  finalization, and created-path cleanup. It is registered in
-  `frontend_tests/runner.cljs`. The tests use a real potok store through
-  `frontend-tests.helpers.state`. Still missing: pointer-driven node/handler drags,
-  path-local undo/redo, and draw/close gestures. Bugs 1, 3, and 11 have direct
-  event-level coverage. Simulated
-  `mse/->PointerEvent`/`mse/->MouseEvent` sequences remain the right
-  next layer.
+  (40 tests / 106 assertions) covers drawing-copy isolation, unchanged simple-shape exit,
+  changed-content finalization, created-path cleanup, the full grouped selection/marquee
+  model, node/segment/handler modifier application, arrow moves, copy/paste, the Alt
+  handler-join toggle, the draw-mode preview suppression, drag-to-merge (node + segment),
+  and — added 2026-07-13 — **path-local undo/redo** (`undo-path`/`redo-path` restore/reapply
+  content and drop the transient preview; the undo entry never captures `:preview`) and
+  **tool operations end-to-end through the real store** (`make-curve`/`remove-node` selected
+  → `:interrupt` → persisted `:path`). It is registered in `frontend_tests/runner.cljs`;
+  the lifecycle/tool tests use a real potok store via `frontend-tests.helpers.state`'s
+  `run-store` (the `:interrupt` exercises the whole refactored stop chain end-to-end). Bugs
+  1, 3, 4, and 11 have direct event-level coverage.
+  **Known limitation — pointer-stream simulation is blocked:** the drag streams read the
+  *global* `ms/mouse-position` / `st/stream` behavior subjects and `undo/path-content-ref`
+  is `(l/derived … store/state)` on the **global** store — none are driven by the local
+  test store. So real `mse/->PointerEvent` drag sequences and the auto-capture undo watcher
+  can't be simulated at the unit level; those paths are covered at the modifier/event level
+  instead (and would need the live-gesture layer below for true pointer coverage).
 - **E2E**: only `frontend/playwright/ui/specs/stroke-to-path.spec.js` touches paths.
   Real pointer-gesture recipes are in Serena memory `frontend/playwright-gestures`;
   a small Playwright spec for draw-path + node-drag would catch DOM-ordering issues

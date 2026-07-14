@@ -6,6 +6,7 @@
 
 (ns frontend-tests.logic.path-edition-test
   (:require
+   [app.common.data.undo-stack :as u]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.test-helpers.compositions :as ctho]
@@ -24,6 +25,8 @@
    [app.main.data.workspace.path.shortcuts :as path.shortcuts]
    [app.main.data.workspace.path.state :as path.state]
    [app.main.data.workspace.path.streams :as path.streams]
+   [app.main.data.workspace.path.tools :as path.tools]
+   [app.main.data.workspace.path.undo :as path.undo]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
@@ -776,3 +779,87 @@
         (t/is (= welded (mapv :params content')))))
     (t/testing "a node dropped with no neighbour in range does not merge"
       (t/is (empty? (emit-of (mk {:nodes #{3} :segments #{} :handlers #{}})))))))
+
+;; --- Path-local undo / redo
+;;
+;; The auto-capture watcher (`start-path-undo`) tracks the *global* store's
+;; content ref, so it can't be driven through the local test store. The undo
+;; events themselves are plain UpdateEvents over `:undo-stack`, so we drive them
+;; directly: seed the stack with `add-undo-entry`, then undo/redo.
+
+(t/deftest path-local-undo-redo-restores-content-and-clears-preview
+  (let [id        (random-uuid)
+        content-a (path/content [{:command :move-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 10 :y 0}}])
+        content-b (path/content [{:command :move-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 10 :y 5}}])
+        base      (-> (selectable-path-state id content-a path.helpers/empty-selection)
+                      (assoc-in [:workspace-local :edit-path id :undo-stack] (u/make-stack)))
+        ;; capture A, change to B (leaving a stale preview), capture B
+        s1        (ptk/update (path.undo/add-undo-entry) base)
+        s2        (-> (path.state/set-content s1 content-b)
+                      (assoc-in [:workspace-local :edit-path id :preview]
+                                {:command :line-to :params {:x 99 :y 99}}))
+        s3        (ptk/update (path.undo/add-undo-entry) s2)
+        s4        (ptk/update (path.undo/undo-path) s3)
+        s5        (ptk/update (path.undo/redo-path) s4)]
+    (t/is (= content-b (path.state/get-path s3 :content)))
+    (t/is (= content-a (path.state/get-path s4 :content)))
+    ;; the render-only preview is dropped when an entry is restored
+    (t/is (nil? (get-in s4 [:workspace-local :edit-path id :preview])))
+    (t/is (= content-b (path.state/get-path s5 :content)))))
+
+(t/deftest path-undo-entry-never-captures-the-transient-preview
+  (let [id     (random-uuid)
+        state  (-> (selectable-path-state id (selectable-path-content)
+                                          path.helpers/empty-selection)
+                   (assoc-in [:workspace-local :edit-path id :undo-stack] (u/make-stack))
+                   (assoc-in [:workspace-local :edit-path id :preview]
+                             {:command :line-to :params {:x 99 :y 99}}))
+        state' (ptk/update (path.undo/add-undo-entry) state)
+        entry  (u/peek (get-in state' [:workspace-local :edit-path id :undo-stack]))]
+    (t/is (some? entry))
+    (t/is (not (contains? entry :preview)))))
+
+;; --- Tool operations through the full edition lifecycle (real store)
+
+(t/deftest tool-make-curve-persists-through-edition-lifecycle
+  (t/async
+    done
+    (let [file   (setup-rect-file)
+          rect   (cths/get-shape file :rect1)
+          id     (:id rect)
+          store  (ths/setup-store file)
+          events (into (start-path-edition-events id)
+                       [(path.selection/select-node 1 false)
+                        (path.tools/make-curve)
+                        :interrupt])]
+      (ths/run-store
+       store done events
+       (fn [new-state]
+         (let [stored (cths/get-shape (ths/get-file-from-state new-state) :rect1)]
+           (t/is (= :path (:type stored)))
+           ;; make-curve on a corner introduces at least one curve segment
+           (t/is (some #(= :curve-to (:command %)) (seq (:content stored))))
+           (t/is (nil? (get-in new-state [:workspace-drawing :object])))))))))
+
+(t/deftest tool-remove-node-persists-through-edition-lifecycle
+  (t/async
+    done
+    (let [file       (setup-rect-file)
+          rect       (cths/get-shape file :rect1)
+          id         (:id rect)
+          orig-nodes (count (path/get-points (:content (path/convert-to-path rect))))
+          store      (ths/setup-store file)
+          events     (into (start-path-edition-events id)
+                           [(path.selection/select-node 1 false)
+                            (path.tools/remove-node)
+                            :interrupt])]
+      (ths/run-store
+       store done events
+       (fn [new-state]
+         (let [stored (cths/get-shape (ths/get-file-from-state new-state) :rect1)]
+           (t/is (= :path (:type stored)))
+           ;; removing a node leaves fewer nodes than the converted rect had
+           (t/is (< (count (path/get-points (:content stored))) orig-nodes))
+           (t/is (nil? (get-in new-state [:workspace-drawing :object])))))))))

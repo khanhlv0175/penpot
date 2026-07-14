@@ -9,6 +9,7 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
+   [app.common.types.path :as path]
    [app.main.refs :as refs]
    [app.main.ui.shapes.path :refer [path-shape]]
    [app.main.ui.workspace.shapes :as shapes]
@@ -55,19 +56,31 @@
 
 (mf/defc draw-area*
   [{:keys [shape zoom tool] :as props}]
-  [:g.draw-area
-   [:g {:style {:pointer-events "none"}}
-    [:& shapes/shape-wrapper {:shape shape}]]
+  (let [;; While drawing or editing, the path content is kept line-closed (a
+        ;; trailing line-to landing back on the subpath start, no close-path
+        ;; command) so the editor's per-node/segment interaction on the closing
+        ;; seam keeps working. The rendered fill/stroke, though, needs the
+        ;; close-path materialized: a coincident-endpoint loop otherwise renders
+        ;; two butt caps at the seam instead of a join. Close the loops only for
+        ;; this rendered copy; the editor overlay uses the raw content.
+        render-shape
+        (mf/with-memo [shape]
+          (if (= :path (dm/get-prop shape :type))
+            (update shape :content path/close-loops)
+            shape))]
+    [:g.draw-area
+     [:g {:style {:pointer-events "none"}}
+      [:& shapes/shape-wrapper {:shape render-shape}]]
 
-   (cond
-     (= tool :path)
-     [:> path-draw-area* props]
+     (cond
+       (= tool :path)
+       [:> path-draw-area* props]
 
-     (= tool :curve)
-     [:& path-shape {:shape shape :zoom zoom}]
+       (= tool :curve)
+       [:& path-shape {:shape shape :zoom zoom}]
 
-     (= (:type shape) :path)
-     nil
+       (= (:type shape) :path)
+       nil
 
-     :else
-     [:> generic-draw-area* props])])
+       :else
+       [:> generic-draw-area* props])]))
