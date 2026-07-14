@@ -195,16 +195,19 @@
     [from to from to]))
 
 (defn segment-mid-point
-  "Position at the parametric middle (t=0.5) of a segment entry."
+  "Position at the arc-length (visual) middle of a segment entry — the point
+  where half the segment's length has been travelled, not the parametric
+  t=0.5, which drifts toward the sharper end on uneven curves."
   [entry]
-  (path.helpers/curve-values (segment-base-curve entry) 0.5))
+  (let [curve (segment-base-curve entry)]
+    (path.helpers/curve-values curve (path.helpers/curve-arc-length-t curve))))
 
 (defn insertion-point
   "The point that a click near `position` would insert into `content`, carrying
   `{:from-p :to-p :t}` split metadata, or nil when a click there would not
-  insert. By default only a segment's exact middle (t=0.5) within `threshold`
-  qualifies; with `anywhere?` the closest point on the path within `threshold`
-  qualifies instead. Close-path segments never insert."
+  insert. By default only a segment's arc-length (visual) middle within
+  `threshold` qualifies; with `anywhere?` the closest point on the path within
+  `threshold` qualifies instead. Close-path segments never insert."
   [content position threshold anywhere?]
   (if anywhere?
     (let [point (path/closest-point content position 0.01)]
@@ -214,10 +217,12 @@
           (->> (segment-entries content)
                (remove #(= :close-path (:command (:segment %))))
                (keep (fn [{:keys [from to] :as entry}]
-                       (let [mid  (segment-mid-point entry)
-                             dist (gpt/distance position mid)]
+                       (let [curve (segment-base-curve entry)
+                             t     (path.helpers/curve-arc-length-t curve)
+                             mid   (path.helpers/curve-values curve t)
+                             dist  (gpt/distance position mid)]
                          (when (<= dist threshold)
-                           [dist (with-meta mid {:from-p from :to-p to :t 0.5})])))))]
+                           [dist (with-meta mid {:from-p from :to-p to :t t})])))))]
       (when (seq candidates)
         (second (apply min-key first candidates))))))
 

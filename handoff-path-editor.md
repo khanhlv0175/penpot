@@ -941,13 +941,23 @@ Work planned on top of the polished editor, with required groundwork:
      (keyboard focus unavailable + synthetic pointer events don't feed the store's hit-test /
      hover, so double-click doesn't trigger edit-mode entry); **needs a quick by-hand check**:
      edit a path, change fill/stroke → previews live; confirm nodes still drag and Esc exits.
-- [ ] **Feature 29 — visual (arc-length) half-point for mid-segment node insertion.**
-   Feature 16 inserts at the Bézier parameter `t = 0.5`, but for many curves that is **not**
-   the visual midpoint. Replace the t=0.5 midpoint (`helpers/segment-mid-point` and the
-   `:t 0.5` split meta) with an arc-length midpoint: flatten/subdivide the curve, accumulate
-   chord lengths, and solve for the `t` where cumulative length reaches half the total; feed
-   that `t` into `create-node-at-position`/`split-segments`. Lines are unaffected (t=0.5 is
-   already their visual middle).
+- [x] **Feature 29 — visual (arc-length) half-point for mid-segment node insertion.**
+   Completed 2026-07-14. Feature 16 inserted at the Bézier parameter `t = 0.5`, which on uneven
+   curves drifts toward the sharper end (not the visual middle). Common
+   (`helpers/curve-arc-length-t`): flattens the cubic into `arc-length-samples` (100) chords,
+   accumulates length, and returns the `t` where cumulative length reaches half the total
+   (linearly interpolated within the crossing sample interval); a straight/degenerate cubic
+   returns 0.5. Frontend (`data/workspace/path/helpers.cljs`): `segment-mid-point` and
+   `insertion-point` now compute `t = curve-arc-length-t(base-curve)` once and use it for
+   **both** the preview point (`curve-values` at that `t`) and the `:t` split meta — so the
+   hover preview and the inserted node land on the same arc-length midpoint. The split itself
+   already honours the meta `t` (`segment/split-segments` → `split-curve-to`/`split-line-to` at
+   `value`). Lines are unaffected (arc-length `t` = 0.5). Verified: common test
+   `helpers-curve-arc-length-t` (line → 0.5; a slow-start curve where `h1=start` → `t > 0.5`
+   with the length-up-to-`t` = half-total property holding within 1%); common suite 146/467,
+   `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. (Pure geometry + a direct `0.5 → t`
+   substitution feeding the existing split path — no lifecycle/render risk; live hover/insert
+   by-hand check still owed given automation can't enter edit mode this session.)
 - [ ] **Feature 30 — segment-targeted operations (flip, delete, merge).** With a **segment**
    selection: (a) **Shift+H / Shift+V** should flip the segment's endpoint nodes (extend
    feature 11's `flip-content` to include segment-endpoint nodes); (b) **Delete** should
@@ -996,12 +1006,13 @@ for features 1–3, 8, 10, and 11 is complete.
 **Remaining work:**
 
 - Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
-- **New batch requested 2026-07-14 — partially done:** **Features 25–28 done** (half-pixel
+- **New batch requested 2026-07-14 — partially done:** **Features 25–29 done** (half-pixel
   node movement above 300% zoom; no pixel-snap for handler drags; node alignment/distribute;
-  path-edition options panel — see §6; feature 28's live UI still owes a by-hand pass, blocked
-  by a read-only browser this session). **Not yet started:** features 29–33 (arc-length
-  half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
-  snap-on-by-default, Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
+  path-edition options panel incl. read-only measures + live styling preview; arc-length
+  half-point insertion — see §6; some path-edition-panel live behaviour still owes a by-hand
+  pass given automation can't enter edit mode this session). **Not yet started:** features
+  30–33 (segment flip/delete/merge, temporary 80% fill opacity, snap-on-by-default,
+  Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
   group's resolved fill so it no longer goes transparent — see §5).

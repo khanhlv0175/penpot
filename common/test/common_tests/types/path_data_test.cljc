@@ -1415,6 +1415,30 @@
     (t/is (= (pts content)
              (pts (path/distribute-content content #{1 2 3} :horizontal))))))
 
+(t/deftest helpers-curve-arc-length-t
+  (let [arc-len (fn [curve a b]
+                  (->> (range 1001)
+                       (map #(path.helpers/curve-values
+                              curve (+ a (* (/ (double %) 1000) (- b a)))))
+                       (partition 2 1)
+                       (map (fn [[p q]] (gpt/distance p q)))
+                       (reduce +)))]
+    ;; a straight line (degenerate cubic) has its visual middle at t=0.5
+    (let [line [(gpt/point 0.0 0.0) (gpt/point 10.0 0.0)
+                (gpt/point 0.0 0.0) (gpt/point 10.0 0.0)]]
+      (t/is (mth/close? 0.5 (path.helpers/curve-arc-length-t line) 0.01)))
+    ;; an uneven curve: `h1 = start` gives zero velocity at t=0, so the curve
+    ;; travels slowly at first and its visual middle is past the parametric
+    ;; middle (t > 0.5); the length up to t is still exactly half the total
+    (let [curve [(gpt/point 0.0 0.0) (gpt/point 100.0 100.0)
+                 (gpt/point 0.0 0.0) (gpt/point 0.0 100.0)]
+          t     (path.helpers/curve-arc-length-t curve)
+          total (arc-len curve 0.0 1.0)
+          first-half (arc-len curve 0.0 t)]
+      (t/is (< 0.5 t 1.0))
+      ;; the length up to t is within 1% of half the total
+      (t/is (< (mth/abs (- first-half (/ total 2.0))) (* 0.01 total))))))
+
 (t/deftest helpers-fit-curve-single-curve
   ;; samples of one gentle cubic are fitted back with a single curve
   (let [curve   [(gpt/point 0.0 0.0) (gpt/point 30.0 0.0)

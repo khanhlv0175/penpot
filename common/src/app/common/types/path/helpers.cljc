@@ -204,6 +204,42 @@
                         :else [ht t2])]
           (recur (double t1) (double t2)))))))
 
+(def ^:private arc-length-samples
+  "Number of flattening samples used to approximate a cubic's arc length."
+  100)
+
+(defn curve-arc-length-t
+  "Parameter `t` in [0, 1] of the **arc-length midpoint** of the cubic
+  `[start end h1 h2]` — the point where the accumulated curve length reaches
+  half the total, i.e. the *visual* middle rather than the parametric `t=0.5`
+  (which drifts toward the sharper end on uneven curves). A `line-to`
+  (`[start end start end]`) traces a straight line, so this returns 0.5. A
+  degenerate zero-length curve also returns 0.5."
+  [[start end h1 h2]]
+  (let [n     arc-length-samples
+        pts   (mapv (fn [i] (curve-values start end h1 h2 (/ (double i) n)))
+                    (range (inc n)))
+        dists (->> (map gpt/distance pts (rest pts))
+                   (reductions + 0.0)
+                   (vec))
+        total (peek dists)]
+    (if (mth/almost-zero? total)
+      0.5
+      (let [half (/ total 2.0)
+            ;; last sample index whose accumulated length is still below half
+            i    (loop [i 0]
+                   (if (and (< (inc i) (count dists))
+                            (< (nth dists (inc i)) half))
+                     (recur (inc i))
+                     i))
+            d0   (nth dists i)
+            d1   (nth dists (inc i))
+            ;; linear interpolation of t within the [i, i+1] sample interval
+            frac (if (mth/almost-zero? (- d1 d0))
+                   0.0
+                   (/ (- half d0) (- d1 d0)))]
+        (/ (+ i frac) n)))))
+
 (defn bend-curve-deltas
   "Handler deltas `{:c1x :c1y :c2x :c2y}` that bend the cubic
   `[start end h1 h2]` so its point at parameter `t` lands on `target`,
