@@ -837,17 +837,37 @@ Work planned on top of the polished editor, with required groundwork:
    `tools`→`dwe/helpers/state/path`, none lead back to `path.edition`). Test
    `dragging-a-node-or-segment-onto-another-merges-them` (node near ⇒ weld; segment
    endpoint near ⇒ weld; far ⇒ no-op); frontend suite 36/94.
-- [ ] **Feature 25 — half-pixel node movement at high zoom (> 300%).** Node positions are
-   quantised to whole pixels by the move pipeline. When the viewport zoom exceeds a
-   threshold (~300%), allow half-pixel (0.5) increments so fine editing is possible when
-   zoomed in; below the threshold keep whole-pixel snapping. Applies to node drags (and
-   likely arrow nudges). Pointer: pixel snapping lives in `streams.cljs` (the pixel-snap
-   step in `move-points-stream`) — gate the quantisation on current zoom (from `refs`/the
-   viewport) so the step becomes 0.5 above the threshold, 1 below.
-- [ ] **Feature 26 — disable pixel snapping for handler movement.** Bézier handler drags
-   should not snap to the pixel grid at all (handles need sub-pixel freedom). Drop the
-   pixel-snap step for handlers only in `move-handler-stream`; object/path snapping and node
-   pixel snapping are unaffected.
+- [x] **Feature 25 — half-pixel node movement at high zoom (> 300%).** Completed
+   2026-07-14. When `:snap-pixel-grid` is on (the default), the path drag pipeline quantised
+   every position to whole pixels via `streams/to-pixel-snap` (`gpt/round`), which is too
+   coarse when zoomed in. `to-pixel-snap` now reads the current zoom and rounds with
+   `gpt/round-step` to **0.5** above the threshold (`half-pixel-snap-zoom` = 3, i.e. zoom
+   strictly `> 300%`) and **1** at/below it. Since `to-pixel-snap` is the shared snap step
+   for `drag-stream`'s start point, `move-points-stream` (nodes) and `move-handler-stream`
+   (handlers), the finer step applies uniformly to every drag while pixel-snap is on; with
+   pixel-snap off, positions still pass through untouched. Arrow-key nudges are a separate
+   pipeline (fixed 1px/10px steps) and are intentionally left discrete. Verified with a new
+   deterministic unit test `to-pixel-snap-quantises-to-half-pixels-past-the-zoom-threshold`
+   (drives the global store: zoom 1 & exactly-3 → whole pixel, zoom 6 → half pixel, snap-off
+   → passthrough); focused suite 41 tests / 110 assertions, 0 failures; `clj-kondo` 0/0,
+   `cljfmt` clean, compiler `:ok`. (Note: feature 26 will separately drop pixel snapping for
+   handlers entirely, superseding the handler part of this shared step.)
+- [x] **Feature 26 — disable pixel snapping for handler movement.** Completed 2026-07-14.
+   `streams/move-handler-stream` (the move-mode handler drag, also used while drawing per
+   feature 20) mapped every pointer position through `to-pixel-snap`, so Bézier handles
+   snapped to the whole/half-pixel grid. Replaced that `(rx/map to-pixel-snap)` with
+   `(rx/filter gpt/point?)`, so handle positions are raw sub-pixel; object/path snapping
+   (`check-path-snap`, gated on the node snap toggle) and the opposite-handle angle match are
+   preserved. The filter also drops nil positions defensively (previously a nil pointer value
+   could slip through `to-pixel-snap` into an x/y-less position map) — strictly safer, and no
+   behaviour change during a real drag where the pointer is always a valid point. **Scope:**
+   only the handler stream — node moves still go through `to-pixel-snap` (feature 25), and the
+   draw-mode "drag out a new handle right after placing a node" gesture uses `position-stream`
+   (tied to the node position) and stays pixel-snapped. Not unit-testable at the stream level
+   (reads the global `ms/mouse-position`, the documented pointer-stream sim limitation in §7);
+   verified by no-regression (focused suite 41 tests / 110 assertions, 0 failures), `clj-kondo`
+   0/0, `cljfmt` clean, compiler `:ok`. Live sub-pixel confirmation deferred (blocked by the
+   flaky browser session this session).
 - [ ] **Feature 27 — alignment / distribute options for path nodes.** The align
    (left/center/right/top/middle/bottom) and distribute (horizontal/vertical) actions should
    operate on the **selected path nodes** during path edition, aligning/distributing node
@@ -916,13 +936,14 @@ for features 1–3, 8, 10, and 11 is complete.
 **Remaining work:**
 
 - Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
-- **New batch requested 2026-07-14 — not yet started:** features 25–33 (half-pixel nodes at
-  high zoom, no handler pixel-snap, node alignment/distribute, path-edition options panel,
-  arc-length half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
-  snap-on-by-default, Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is
-  fixed** (2026-07-14, editor now close-loops the rendered drawing copy — see §5). **Bug 14
-  is fixed** (2026-07-14: keep SVG-default black in normal view per user decision; edition
-  copy now inherits the group's resolved fill so it no longer goes transparent — see §5).
+- **New batch requested 2026-07-14 — partially done:** **Features 25 & 26 done** (half-pixel
+  node movement above 300% zoom; no pixel-snap for handler drags — see §6). **Not yet
+  started:** features 27–33 (node alignment/distribute, path-edition options panel, arc-length
+  half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
+  snap-on-by-default, Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
+  editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
+  keep SVG-default black in normal view per user decision; edition copy now inherits the
+  group's resolved fill so it no longer goes transparent — see §5).
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of

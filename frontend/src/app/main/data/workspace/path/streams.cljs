@@ -21,6 +21,11 @@
 
 (defonce drag-threshold 5)
 
+(def ^:private half-pixel-snap-zoom
+  "Above this zoom, pixel snapping quantises to half-pixels instead of whole
+  pixels so fine node/handler positioning stays possible when zoomed in."
+  3)
+
 (defn dragging? [start zoom]
   (fn [current]
     (>= (gpt/distance start current) (/ drag-threshold zoom))))
@@ -34,15 +39,15 @@
 
 (defn to-pixel-snap [position]
   (let [layout      (get @st/state :workspace-layout)
-        snap-pixel? (contains? layout :snap-pixel-grid)]
+        snap-pixel? (contains? layout :snap-pixel-grid)
+        zoom        (get-in @st/state [:workspace-local :zoom] 1)]
 
     (cond
       (or (not snap-pixel?) (not (gpt/point? position)))
       position
 
-
       :else
-      (gpt/round position))))
+      (gpt/round-step position (if (> zoom half-pixel-snap-zoom) 0.5 1)))))
 
 (defn drag-stream
   ([to-stream]
@@ -149,8 +154,12 @@
                   (merge position (gpt/add position snap)))))
             position))]
 
+    ;; Handler positions are never quantised to the pixel grid: Bézier handles
+    ;; need sub-pixel freedom. Object/path snapping (`check-path-snap`, gated on
+    ;; the node snap toggle) still applies; only whole/half-pixel snapping is
+    ;; skipped, unlike node moves which go through `to-pixel-snap`.
     (->> ms/mouse-position
-         (rx/map to-pixel-snap)
+         (rx/filter gpt/point?)
          (rx/with-latest-from
            (fn [position shift? alt?]
              (assoc position :shift? shift? :alt? alt?))

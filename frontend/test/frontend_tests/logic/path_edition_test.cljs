@@ -27,6 +27,7 @@
    [app.main.data.workspace.path.streams :as path.streams]
    [app.main.data.workspace.path.tools :as path.tools]
    [app.main.data.workspace.path.undo :as path.undo]
+   [app.main.store :as st]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
@@ -56,6 +57,27 @@
 (t/deftest clear-edition-mode-finishes-path-streams
   (t/is (path.streams/finish-edition? (dwe/clear-edition-mode)))
   (t/is (not (path.streams/finish-edition? :interrupt))))
+
+(t/deftest to-pixel-snap-quantises-to-half-pixels-past-the-zoom-threshold
+  ;; `to-pixel-snap` reads the global store for the pixel-snap layout flag and
+  ;; the current zoom. Above 300% zoom fine positioning needs half-pixel steps.
+  (let [original @st/state
+        snap     (fn [zoom p]
+                   (reset! st/state {:workspace-layout #{:snap-pixel-grid}
+                                     :workspace-local {:zoom zoom}})
+                   (path.streams/to-pixel-snap p))]
+    (try
+      ;; at or below the threshold, snapping rounds to whole pixels
+      (t/is (= (gpt/point 100 100) (snap 1 (gpt/point 100.4 100.4))))
+      (t/is (= (gpt/point 100 100) (snap 3 (gpt/point 100.4 100.4))))
+      ;; above 300% zoom it rounds to the nearest half pixel
+      (t/is (= (gpt/point 100.5 100.5) (snap 6 (gpt/point 100.4 100.4))))
+      ;; with pixel snapping off the position passes through unchanged
+      (reset! st/state {:workspace-layout #{} :workspace-local {:zoom 6}})
+      (t/is (= (gpt/point 100.4 100.4)
+               (path.streams/to-pixel-snap (gpt/point 100.4 100.4))))
+      (finally
+        (reset! st/state original)))))
 
 (t/deftest clear-edition-mode-finishes-active-path-before-finalizing
   (let [id         (random-uuid)
