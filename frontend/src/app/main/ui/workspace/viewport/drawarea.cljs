@@ -21,6 +21,33 @@
   (let [get-fn #(dm/get-in % [:edit-path id])]
     (l/derived get-fn refs/workspace-local)))
 
+(def ^:private edit-fill-opacity
+  "Fills are dimmed to this fraction of their opacity while a path is edited so
+  elements behind the (otherwise opaque) edited path show through."
+  0.8)
+
+(def ^:private synced-edit-attrs
+  "Stored-shape visual attrs mirrored into the drawing copy while editing so
+  options-panel edits preview live. Geometry stays with the edited copy."
+  [:strokes :shadow :blur :background-blur :opacity :blend-mode])
+
+(defn- dim-fills
+  [fills]
+  (mapv (fn [fill]
+          (update fill :fill-opacity #(* (or % 1) edit-fill-opacity)))
+        fills))
+
+(defn path-edit-shape
+  "The shape `draw-area*` renders while editing a path: the drawing copy with
+  the stored shape's live visual attrs merged in (so options-panel edits
+  preview) and its fills dimmed (so the background shows through). Fills are
+  only taken from the stored shape when it has its own, so an inherited /
+  SVG-default fill resolved into the drawing copy is preserved (bug 14)."
+  [drawing-obj stored]
+  (-> (cond-> (merge drawing-obj (select-keys stored synced-edit-attrs))
+        (seq (:fills stored)) (assoc :fills (:fills stored)))
+      (update :fills dim-fills)))
+
 (mf/defc generic-draw-area*
   {::mf/private true}
   [{:keys [shape zoom]}]

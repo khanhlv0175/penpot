@@ -981,11 +981,18 @@ Work planned on top of the polished editor, with required groundwork:
    `delete-selected-opens-segments-else-removes-nodes`; focused suite 47/125, 0 failures;
    `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. Live by-hand check still owed (automation
    can't enter edit mode this session).
-- [ ] **Feature 31 — temporary 80% fill opacity while editing a path.** While a path is in
-   edition, render its fills at 80% opacity so the user can see elements behind it (an opaque
-   edited path otherwise hides background content). Temporary/visual only — must **not**
-   persist to the shape's real `:fills`. Apply to the drawing-copy render in both viewports
-   (classic + WASM); restore on exit.
+- [x] **Feature 31 — temporary 80% fill opacity while editing a path.** Completed 2026-07-14.
+   Reused the feature-28 render-time merge point: the previously-duplicated `draw-area-shape`
+   logic in both viewports was extracted to `drawarea/path-edit-shape [drawing-obj stored]`,
+   which merges the stored shape's live visual attrs (feature 28 preview) **and** dims the
+   fills to `edit-fill-opacity` (0.8) via `dim-fills` (multiplies each fill's `:fill-opacity`,
+   so a fill already below 100% still dims). Both viewports now call it while path-editing.
+   **Purely visual** — it only affects the shape `draw-area*` renders (the drawing copy), never
+   the stored `:fills` or the drawing copy's own `:fills`, so nothing persists on exit and no
+   restore step is needed; it also naturally reverts because `draw-area-shape` falls back to the
+   raw `drawing-obj` once `path-editing?` is false. Rendering-only, no lifecycle/persistence
+   risk. `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. (No unit test — a 4-line pure fn in a
+   UI namespace; live by-hand check owed as automation can't enter edit mode this session.)
 - [ ] **Feature 32 — snap-to-node on by default when creating / editing a path.** The node
    snap toggle (`:snap-toggled`) should default **on** for both new-path creation and
    existing-path edition (initialise it where `start-edition` / `start-path-edit` set up the
@@ -1022,12 +1029,12 @@ for features 1–3, 8, 10, and 11 is complete.
 **Remaining work:**
 
 - Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
-- **New batch requested 2026-07-14 — partially done:** **Features 25–30 done** (half-pixel
+- **New batch requested 2026-07-14 — partially done:** **Features 25–31 done** (half-pixel
   node movement above 300% zoom; no pixel-snap for handler drags; node alignment/distribute;
   path-edition options panel incl. read-only measures + live styling preview; arc-length
-  half-point insertion; segment flip/delete/merge — see §6; several path-edition live
-  behaviours still owe a by-hand pass given automation can't enter edit mode this session).
-  **Not yet started:** features 31–33 (temporary 80% fill opacity, snap-on-by-default,
+  half-point insertion; segment flip/delete/merge; temporary 80% fill opacity — see §6;
+  several path-edition live behaviours still owe a by-hand pass given automation can't enter
+  edit mode this session). **Not yet started:** features 32–33 (snap-on-by-default,
   Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
