@@ -181,6 +181,14 @@
                 (remove nil?))
           (segment-entries content))))
 
+(defn selected-node-indices
+  "The effective set of selected node indices for node operations: the
+  explicitly selected `:nodes` plus the endpoint nodes of any selected
+  `:segments`. Lets flip/merge/remove act on a segment selection."
+  [content selection]
+  (into (get selection :nodes #{})
+        (segment-node-indices content (get selection :segments #{}))))
+
 (def segment-insert-threshold
   "Distance (board px, divided by zoom at the call site) from a segment's exact
   middle within which a plain click inserts a node instead of selecting."

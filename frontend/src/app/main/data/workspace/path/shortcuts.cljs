@@ -78,7 +78,7 @@
    :delete-node     {:tooltip (ds/supr)
                      :command ["del" "backspace"]
                      :subsections [:path-editor]
-                     :fn #(st/emit! (drp/remove-node))}
+                     :fn #(st/emit! (drp/delete-selected))}
 
    :merge-nodes     {:tooltip (ds/meta "J")
                      :command (ds/c-mod "j")

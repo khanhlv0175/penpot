@@ -83,11 +83,13 @@
 
         content (:content shape)
 
-        selected-nodes (get selection :nodes #{})
+        ;; a selected segment contributes its endpoint nodes, so the node-op
+        ;; buttons enable for segment selections too
+        selected-nodes (path.helpers/selected-node-indices content selection)
 
         enabled-buttons
         (mf/use-memo
-         (mf/deps content selected-nodes)
+         (mf/deps content selection)
          #(check-enabled content (path.helpers/node-positions content selected-nodes)))
 
         on-select-draw-mode
@@ -112,7 +114,7 @@
          (mf/deps (:remove-node enabled-buttons))
          (fn [_]
            (when (:remove-node enabled-buttons)
-             (st/emit! (drp/remove-node)))))
+             (st/emit! (drp/delete-selected)))))
 
         on-merge-nodes
         (mf/use-fn

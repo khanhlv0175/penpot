@@ -30,8 +30,12 @@
 
              old-content (:content shape)
 
+             ;; a selected segment contributes its endpoint nodes, so node ops
+             ;; (merge / make-corner / separate / …) act on segment selections
              selected-nodes
-             (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+             (helpers/selected-node-indices
+              old-content
+              (dm/get-in state [:workspace-local :edit-path id :selection]))
 
              points
              (or points (helpers/node-positions old-content selected-nodes))]
@@ -85,6 +89,20 @@
 (defn separate-nodes []
   (process-path-tool path/separate-nodes))
 
+(defn delete-selected
+  "Delete key / remove button: with a segment selection, opens the path at the
+  selected segments (drops just those segments, keeping their nodes) via
+  `separate-nodes`; otherwise removes the selected nodes via `remove-node`."
+  []
+  (ptk/reify ::delete-selected
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id       (st/get-path-id state)
+            segments (dm/get-in state [:workspace-local :edit-path id :selection :segments] #{})]
+        (rx/of (if (seq segments)
+                 (separate-nodes)
+                 (remove-node)))))))
+
 (defn flip-nodes
   "Flips the selected nodes (or the whole path when nothing is selected)
   across the center of their bounding box. `axis` is `:horizontal` or
@@ -95,7 +113,9 @@
     (update [_ state]
       (let [id       (st/get-path-id state)
             content  (st/get-path state :content)
-            selected (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+            selected (helpers/selected-node-indices
+                      content
+                      (dm/get-in state [:workspace-local :edit-path id :selection]))
             indices  (if (seq selected)
                        selected
                        (helpers/node-indices content))

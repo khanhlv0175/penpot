@@ -958,13 +958,29 @@ Work planned on top of the polished editor, with required groundwork:
    `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. (Pure geometry + a direct `0.5 → t`
    substitution feeding the existing split path — no lifecycle/render risk; live hover/insert
    by-hand check still owed given automation can't enter edit mode this session.)
-- [ ] **Feature 30 — segment-targeted operations (flip, delete, merge).** With a **segment**
-   selection: (a) **Shift+H / Shift+V** should flip the segment's endpoint nodes (extend
-   feature 11's `flip-content` to include segment-endpoint nodes); (b) **Delete** should
-   remove the selected segment(s) — today Delete only acts on `:nodes` (see the §12 UX gap);
-   (c) **merge-nodes** should work from a segment selection (merge the segment's two endpoint
-   nodes). Relax `path_actions/check-enabled` and the Delete shortcut to consider
-   `:segments`, and route the operations through the existing `process-path-tool` fns.
+- [x] **Feature 30 — segment-targeted operations (flip, delete, merge).** Completed
+   2026-07-14. A selected segment now contributes its endpoint nodes to node operations. New
+   `helpers/selected-node-indices content selection` = `:nodes` ∪
+   `segment-node-indices(:segments)`; wired into `tools/process-path-tool` (so merge / make-
+   corner / make-curve / separate / … act on segment selections) and `tools/flip-nodes`
+   (Shift+H/V flips the segment's endpoint nodes), and `path_actions/check-enabled` is fed the
+   effective positions so the top-bar buttons enable for segment selections.
+   - **Merge** (segment) collapses the segment's two endpoints to their centroid (via the
+     existing `merge-nodes`).
+   - **Delete** is now `tools/delete-selected` (bound to the Delete key **and** the remove-node
+     button): with a **segment** selection it **opens the path at those segments**
+     (`separate-nodes` — drops just the selected segments, keeping the nodes) rather than
+     healing them away; with a **node** selection it removes the nodes (`remove-node`) as
+     before. Chosen over remove-nodes-of-endpoints because that heals a fitted curve across the
+     gap, removing the two neighbouring segments too — not "delete *the* segment". (Edge case:
+     deleting a subpath's first/last segment drops the now-dangling end node instead of making
+     an empty subpath.)
+   Verified: frontend store tests `selected-node-indices-folds-segment-endpoints`,
+   `flip-nodes-includes-selected-segment-endpoints`,
+   `merge-nodes-includes-selected-segment-endpoints`,
+   `delete-selected-opens-segments-else-removes-nodes`; focused suite 47/125, 0 failures;
+   `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. Live by-hand check still owed (automation
+   can't enter edit mode this session).
 - [ ] **Feature 31 — temporary 80% fill opacity while editing a path.** While a path is in
    edition, render its fills at 80% opacity so the user can see elements behind it (an opaque
    edited path otherwise hides background content). Temporary/visual only — must **not**
@@ -1006,12 +1022,12 @@ for features 1–3, 8, 10, and 11 is complete.
 **Remaining work:**
 
 - Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
-- **New batch requested 2026-07-14 — partially done:** **Features 25–29 done** (half-pixel
+- **New batch requested 2026-07-14 — partially done:** **Features 25–30 done** (half-pixel
   node movement above 300% zoom; no pixel-snap for handler drags; node alignment/distribute;
   path-edition options panel incl. read-only measures + live styling preview; arc-length
-  half-point insertion — see §6; some path-edition-panel live behaviour still owes a by-hand
-  pass given automation can't enter edit mode this session). **Not yet started:** features
-  30–33 (segment flip/delete/merge, temporary 80% fill opacity, snap-on-by-default,
+  half-point insertion; segment flip/delete/merge — see §6; several path-edition live
+  behaviours still owe a by-hand pass given automation can't enter edit mode this session).
+  **Not yet started:** features 31–33 (temporary 80% fill opacity, snap-on-by-default,
   Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the

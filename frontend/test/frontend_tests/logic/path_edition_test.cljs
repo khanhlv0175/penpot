@@ -389,6 +389,65 @@
     (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
     (t/is (= (gpt/point 10 9) (path.helpers/node-position content' 2)))))
 
+(t/deftest selected-node-indices-folds-segment-endpoints
+  (let [content (selectable-path-content)]
+    ;; segment index 1 connects nodes 0 and 1
+    (t/is (= #{0 1}
+             (path.helpers/selected-node-indices content {:nodes #{} :segments #{1}})))
+    ;; explicit nodes and segment endpoints are unioned
+    (t/is (= #{0 1 2}
+             (path.helpers/selected-node-indices content {:nodes #{2} :segments #{1}})))))
+
+(t/deftest flip-nodes-includes-selected-segment-endpoints
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{1} :handlers #{}})
+        state'   (ptk/update (path.tools/flip-nodes :horizontal) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; segment 1's endpoints (nodes 0 and 1) mirror across their bbox centre (x=5)
+    (t/is (= (gpt/point 10 0) (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 1)))
+    ;; node 2 is not an endpoint of segment 1, so it stays put
+    (t/is (= (gpt/point 20 0) (path.helpers/node-position content' 2)))))
+
+(t/deftest merge-nodes-includes-selected-segment-endpoints
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{1} :handlers #{}})
+        state'   (ptk/update (path.tools/merge-nodes) state)
+        content' (get-in state' [:workspace-drawing :object :content])
+        pts      (path/get-points content')]
+    ;; segment 1's endpoints (0,0) and (10,0) merge to their midpoint (5,0)
+    (t/is (some #(= (gpt/point 5 0) %) pts))
+    (t/is (< (count pts) 3))))
+
+(t/deftest delete-selected-opens-segments-else-removes-nodes
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 0}}
+                   {:command :line-to :params {:x 20 :y 0}}
+                   {:command :line-to :params {:x 30 :y 0}}])
+        run      (fn [selection]
+                   (let [state  (selectable-path-state id content selection)
+                         events (atom [])]
+                     (->> (ptk/watch (path.tools/delete-selected) state nil)
+                          (rx/subs! #(swap! events conj %)))
+                     ;; delete-selected emits a single node-tool event; apply it
+                     (ptk/update (first @events) state)))
+        move-tos (fn [st] (->> (get-in st [:workspace-drawing :object :content])
+                               vec
+                               (filter #(= :move-to (:command %)))
+                               count))
+        nodes    (fn [st] (count (path/get-points
+                                  (get-in st [:workspace-drawing :object :content]))))]
+    ;; deleting the middle segment (index 2) opens the path into two subpaths
+    (t/is (> (move-tos (run {:nodes #{} :segments #{2} :handlers #{}})) 1))
+    ;; deleting a node removes it (fewer than the original 4 nodes)
+    (t/is (< (nodes (run {:nodes #{1} :segments #{} :handlers #{}})) 4))))
+
 (defn- run-handle-drawing-end
   "Drives the handle-drawing continuation with an ::end-edition carrying
   the given :restart? flag and calls back with the drawing-end emissions."

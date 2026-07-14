@@ -50,6 +50,7 @@
 (dm/export tools/make-corner)
 (dm/export tools/add-node)
 (dm/export tools/remove-node)
+(dm/export tools/delete-selected)
 (dm/export tools/merge-nodes)
 (dm/export tools/join-nodes)
 (dm/export tools/separate-nodes)
