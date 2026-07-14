@@ -165,11 +165,16 @@
         (select-keys shape stroke-attrs)]
 
     [:*
-     [:> measures-menu* {:ids ids
-                         :type type
-                         :applied-tokens applied-tokens
-                         :values measure-values
-                         :shapes shapes}]
+     ;; Measures are shown read-only while editing nodes: geometry (size /
+     ;; position / rotation) is owned by the drawing copy during edition and
+     ;; editing it here would neither preview nor persist reliably. The
+     ;; pointer-events wrapper keeps the values visible but non-interactive.
+     [:div {:style {:pointer-events "none" :opacity 0.6}}
+      [:> measures-menu* {:ids ids
+                          :type type
+                          :applied-tokens applied-tokens
+                          :values measure-values
+                          :shapes shapes}]]
      [:> fill/fill-menu*
       {:ids ids
        :type type

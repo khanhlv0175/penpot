@@ -908,10 +908,39 @@ Work planned on top of the polished editor, with required groundwork:
    just disable when too few nodes are selected): `align-options*`'s visibility gate became
    `(when (or path-edit? (not (and disabled-align disabled-distribute))) …)`, so it no longer
    hides when nothing is selected mid-edit. `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`.
-   **Live UI not verified this session** — the browser workspace was stuck read-only
-   (WebGL-context / options-mode state that survived reloads), which renders the read-only
-   inspect panel and bypasses `design-menu*` entirely; the rendering wiring is straightforward
-   but a by-hand pass is still owed.
+   **Verified live 2026-07-14** (Playwright screenshot, editable workspace): the path-edition
+   panel renders align/distribute + measures + fill + stroke + shadow + blur, no
+   boolean/layout/export.
+
+   **Panel-edit polish (2026-07-14):**
+   - **Read-only measures.** The measures block in `path-edition-options*` is wrapped in a
+     `{:style {:pointer-events "none" :opacity 0.6}}` container (user decision = option 2):
+     size / position / rotation are **visible but non-interactive**. Geometry edits during node
+     editing neither preview nor persist reliably (`finalize-path-content` overwrites
+     `:content`, which for WASM has rotation baked in), so they must not be editable here.
+     Chosen over a `read-only?` flag through `measures-menu*` (its inputs use inconsistent
+     `:is-disabled`/`:disabled` — the `:y` field's `:disabled` is a pre-existing no-op).
+   - **Live preview via render-time merge (NOT a store watcher).** Panel edits commit to the
+     **stored** shape, but the editor renders the **drawing copy** — so styling changes didn't
+     preview until exit. Both viewports (`viewport.cljs`, `viewport_wasm.cljs`) now compute
+     `draw-area-shape`: while path-editing, `(merge drawing-obj (select-keys stored [:strokes
+     :shadow :blur :background-blur :opacity :blend-mode]))` plus `:fills` overridden **only
+     when the stored shape has its own** (so bug 14's inherited/SVG-default fill resolved into
+     the drawing copy is preserved), and pass it to `draw-area*` instead of the raw drawing-obj.
+     Reactive on `base-objects`, so a panel edit → objects change → viewport re-render →
+     `draw-area-shape` recomputes with the new attrs → live preview. **Crucially this is a pure
+     rendering change** (no watcher / event / `swap!`), so — unlike the reverted store-watcher
+     attempt — it cannot touch the edit lifecycle or re-enter a store swap. **A first attempt
+     used a `start-path-edit` watcher + `rx/from-atom` sync (`edit-shape-attrs-stream` /
+     `sync-drawing-attrs`) that passed unit tests but broke live node-editing/exit — `from-atom`
+     fires re-entrantly inside the store swap (§3), a hazard the static test store never
+     exercised; it was reverted and replaced by this render-merge.** Geometry (rotation /
+     position / size) is intentionally NOT merged — owned by the edited drawing copy — matching
+     the read-only measures. `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`.
+     **Live edit-mode not re-verified this session** — automation can't enter path edit
+     (keyboard focus unavailable + synthetic pointer events don't feed the store's hit-test /
+     hover, so double-click doesn't trigger edit-mode entry); **needs a quick by-hand check**:
+     edit a path, change fill/stroke → previews live; confirm nodes still drag and Esc exits.
 - [ ] **Feature 29 — visual (arc-length) half-point for mid-segment node insertion.**
    Feature 16 inserts at the Bézier parameter `t = 0.5`, but for many curves that is **not**
    the visual midpoint. Replace the t=0.5 midpoint (`helpers/segment-mid-point` and the

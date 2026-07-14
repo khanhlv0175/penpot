@@ -310,6 +310,22 @@
                                 (get edit-path (get drawing-obj :id))))
         path-bar-shape    (or editing-shape drawing-obj)
 
+        ;; While editing a path, mirror the stored shape's visual attrs
+        ;; (fill/stroke/shadow/blur/opacity/blend) into the drawing copy that
+        ;; draw-area* renders, so options-panel edits preview live. Done at
+        ;; render time (reactive on base-objects) rather than via a store
+        ;; watcher, to avoid re-entrant swaps in the edit lifecycle. Fills are
+        ;; only overridden when the stored shape has its own, so an inherited /
+        ;; SVG-default fill (bug 14) resolved into the drawing copy is kept.
+        draw-area-shape   (mf/with-memo [drawing-obj edition path-editing? base-objects]
+                            (if (and path-editing? edition)
+                              (let [stored (get base-objects edition)]
+                                (cond-> (merge drawing-obj
+                                               (select-keys stored [:strokes :shadow :blur
+                                                                    :background-blur :opacity :blend-mode]))
+                                  (seq (:fills stored)) (assoc :fills (:fills stored))))
+                              drawing-obj))
+
         create-comment?   (= :comments drawing-tool)
 
         text-editing?     (cfh/text-shape? editing-shape)
@@ -884,7 +900,7 @@
        (when (and ^boolean show-draw-area?
                   ^boolean (cts/shape? drawing-obj))
          [:> drawarea/draw-area*
-          {:shape drawing-obj
+          {:shape draw-area-shape
            :zoom zoom
            :tool drawing-tool}])
 
