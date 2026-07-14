@@ -624,7 +624,7 @@
                                        {:edit-mode :move
                                         :selection helpers/empty-selection
                                         :hover helpers/empty-selection
-                                        :snap-toggled false
+                                        :snap-toggled true
                                         :add-nodes false})]
                            (assoc state :old-content (:content shape))))))))
 

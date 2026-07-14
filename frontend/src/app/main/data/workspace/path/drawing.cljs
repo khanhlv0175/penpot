@@ -257,7 +257,13 @@
     ptk/UpdateEvent
     (update [_ state]
       (let [id (st/get-path-id state)]
-        (assoc-in state [:workspace-local :edit-path id :edit-mode] :draw)))
+        (update-in state [:workspace-local :edit-path id]
+                   (fn [edit-state]
+                     (-> edit-state
+                         (assoc :edit-mode :draw)
+                         ;; Snap to nodes is on by default; a restart of the draw
+                         ;; loop keeps the user's explicit toggle.
+                         (update :snap-toggled (fnil identity true)))))))
 
     ptk/WatchEvent
     (watch [_ state stream]

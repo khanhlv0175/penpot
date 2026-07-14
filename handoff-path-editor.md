@@ -993,11 +993,19 @@ Work planned on top of the polished editor, with required groundwork:
    raw `drawing-obj` once `path-editing?` is false. Rendering-only, no lifecycle/persistence
    risk. `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`. (No unit test — a 4-line pure fn in a
    UI namespace; live by-hand check owed as automation can't enter edit mode this session.)
-- [ ] **Feature 32 — snap-to-node on by default when creating / editing a path.** The node
-   snap toggle (`:snap-toggled`) should default **on** for both new-path creation and
-   existing-path edition (initialise it where `start-edition` / `start-path-edit` set up the
-   edit state). Feature 15 already surfaces the toggle mid-draw; this only flips the initial
-   value.
+- [x] **Feature 32 — snap-to-node on by default when creating / editing a path.** Completed
+   2026-07-14. The node snap toggle (`:snap-toggled`) now defaults **on** for both flows.
+   Existing-path edition (`edition/start-path-edit`): the fresh-state literal flipped
+   `:snap-toggled false` → `true` (only the newly-created `:edit-path` map, so re-entering
+   an already-open edition preserves the current value). New-path creation
+   (`drawing/start-edition`): its `assoc-in :edit-mode :draw` became an `update-in` that also
+   `(update :snap-toggled (fnil identity true))` — defaults to `true` when the flag is unset
+   (first draw) yet **keeps the user's explicit toggle across draw-loop restarts** (`fnil`
+   only replaces nil, so a mid-draw turn-off survives a `start-created-path-edition` /
+   `start-draw-mode*` re-entry). Feature 15 already surfaces the toggle mid-draw. Compiler
+   `:ok`, `clj-kondo` 0/0, `cljfmt` clean. (Trivial initial-value flip; live by-hand check
+   owed with the other path-edition behaviours — automation can't enter edit mode this
+   session.)
 - [ ] **Feature 33 — duplicate nodes & segments (Ctrl+D, Alt+drag).** `Ctrl+D` duplicates
    the current selection: a **segment** duplicates exactly like copy/paste of a segment
    (reuse feature 2's `extract-content`/`splice-content` + the paste offset); a **node**
@@ -1034,8 +1042,9 @@ for features 1–3, 8, 10, and 11 is complete.
   path-edition options panel incl. read-only measures + live styling preview; arc-length
   half-point insertion; segment flip/delete/merge; temporary 80% fill opacity — see §6;
   several path-edition live behaviours still owe a by-hand pass given automation can't enter
-  edit mode this session). **Not yet started:** features 32–33 (snap-on-by-default,
-  Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
+  edit mode this session). **Feature 32 done** (2026-07-14, snap-to-node on by default for
+  both creation and edition — see §6). **Not yet started:** feature 33 (Ctrl+D / Alt+drag
+  duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
   group's resolved fill so it no longer goes transparent — see §5).
