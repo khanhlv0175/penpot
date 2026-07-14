@@ -382,16 +382,29 @@ Verified against pinned sources: potok2 `0f7e15a` and beicon2 `8744c66` in
   (e.g. endpoint → `c1=(33.3,0)`, `c2=(100,0)` coincident). New test
   `segment-make-curve-point-keeps-neighbors-corners`; full common suite 1100 tests / 24570
   assertions, 0 failures; `cljfmt`/`clj-kondo` clean.
-- [ ] **Bug 14 — path with no fills inside an SVG group defaults to black, not
-  transparent.** When a path lives inside an imported SVG group and has no `:fills`, it
-  renders **black** instead of transparent (SVG's `fill: black` default leaking through
-  instead of Penpot's no-fill = transparent). The fill fallback must be transparent for a
-  no-fill path. **This is also broken during path edition** (item requested 2026-07-14):
-  entering edition on such a path does not correct the fill, so the editor shows a black
-  body. Investigate the render fallback for no-fill paths (classic + WASM) and the
-  SVG-import fill defaulting; ensure the editor drawing copy inherits the same no-fill →
-  transparent behaviour. (Base defaulting may predate this branch; the editor part is
-  new.)
+- [x] **Bug 14 — no-fill path in an SVG group renders black in normal view but
+  transparent while editing.** Fixed 2026-07-14. A path inside an imported SVG group with no
+  `:fills` renders **black**: the imported `:group` carries `:svg-attrs`, so CLJS
+  `render-wasm/svg-fills/resolve-shape-fills` gives it the SVG-default black fill (its
+  `:group` branch), and the Rust renderer pushes the group's fills onto `nested_fills`
+  (`render.rs:2532`) so the empty-fill child path renders with the group's black
+  (`render.rs:1754`). **User decision (2026-07-14): keep the black in normal view** — it is
+  correct SVG-spec behaviour (default `fill` is black, cascaded to children), so
+  `resolve-shape-fills` is left unchanged. The real defect was the **inconsistency during
+  edition**: `start-path-edit` copies the path into `[:workspace-drawing :object]` and it is
+  rendered **standalone** via `drawarea/draw-area*` → classic `shape-wrapper`, so the group's
+  `nested_fills` cascade no longer applies and the copy (own `:fills []`) rendered
+  transparent — the fill vanished the moment you entered edition. Fix (`path/edition.cljs`):
+  new `resolve-edit-fills` resolves the copy's effective fills, mirroring the renderer
+  cascade — a shape with its own fills keeps them, otherwise it inherits the nearest ancestor
+  **group's** `resolve-shape-fills` (frames reset the cascade, matching `render.rs`) — and
+  `start-path-edit` assocs the result onto the drawing copy's `:fills`. Purely visual:
+  `finalize-path-content` only ever writes `:content` back to the stored shape and the no-op
+  guard compares content, so the resolved fill is never persisted; the design panel reads the
+  stored shape, not the copy. Verified live (WASM viewport, real gestures): a no-fill path in
+  an SVG group rendered black normally and **stayed black while editing** (was transparent
+  before), and on exit the stored `:fills` were still `[]` (no mutation). Compiler `:ok`,
+  `clj-kondo` 0/0, `cljfmt` clean.
 
 ## 6. Refactors and features checklist
 
@@ -906,9 +919,10 @@ for features 1–3, 8, 10, and 11 is complete.
 - **New batch requested 2026-07-14 — not yet started:** features 25–33 (half-pixel nodes at
   high zoom, no handler pixel-snap, node alignment/distribute, path-edition options panel,
   arc-length half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
-  snap-on-by-default, Ctrl+D / Alt+drag duplicate), plus **Bug 14** (no-fill path in an SVG
-  group renders black, also while editing). See §5/§6 for each. **Bug 12 reopened is fixed**
-  (2026-07-14, editor now close-loops the rendered drawing copy — see §5).
+  snap-on-by-default, Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is
+  fixed** (2026-07-14, editor now close-loops the rendered drawing copy — see §5). **Bug 14
+  is fixed** (2026-07-14: keep SVG-default black in normal view per user decision; edition
+  copy now inherits the group's resolved fill so it no longer goes transparent — see §5).
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of

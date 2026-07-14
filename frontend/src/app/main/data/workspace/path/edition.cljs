@@ -8,6 +8,7 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.types.path :as path]
    [app.common.types.path.helpers :as path.helpers]
@@ -21,6 +22,7 @@
    [app.main.data.workspace.path.tools :as tools]
    [app.main.data.workspace.path.undo :as undo]
    [app.main.streams :as ms]
+   [app.render-wasm.svg-fills :as svg-fills]
    [app.util.mouse :as mse]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -580,6 +582,23 @@
 
 (declare stop-path-edit)
 
+(defn- resolve-edit-fills
+  "Resolves the fills the editing copy must render so it matches the committed
+  view. A shape with its own fills keeps them; an empty-fill shape inherits the
+  nearest ancestor group's resolved fills, mirroring the renderer's nested-fill
+  cascade, so an SVG-group child that renders black (the SVG default) stays
+  black while edited instead of turning transparent. Frames reset the cascade."
+  [shape objects]
+  (let [own (svg-fills/resolve-shape-fills shape)]
+    (if (seq own)
+      own
+      (loop [parent-id (:parent-id shape)]
+        (let [parent (get objects parent-id)]
+          (cond
+            (nil? parent)             []
+            (cfh/group-shape? parent) (svg-fills/resolve-shape-fills parent)
+            (cfh/frame-shape? parent) []
+            :else                     (recur (:parent-id parent))))))))
 
 (defn start-path-edit
   [id]
@@ -591,7 +610,8 @@
             shape     (-> shape
                           (path/convert-to-path objects)
                           (update :content path/close-subpaths)
-                          (path/update-geometry))]
+                          (path/update-geometry))
+            shape     (assoc shape :fills (resolve-edit-fills shape objects))]
 
         (-> state
             (assoc-in [:workspace-drawing :object] shape)
