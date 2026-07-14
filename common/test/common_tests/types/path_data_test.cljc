@@ -1345,6 +1345,76 @@
         pts     (mapv (comp (juxt :x :y) :params) (vec result))]
     (t/is (= [[10.0 0.0] [0.0 0.0] [10.0 10.0]] pts))))
 
+(t/deftest segment-align-content
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 2.0}}
+                  {:command :line-to :params {:x 4.0 :y 20.0}}])
+        pts     (fn [c] (mapv (comp (juxt :x :y) :params) (vec c)))]
+    ;; align to the left edge: every selected x becomes the min x
+    (t/is (= [[0.0 0.0] [0.0 2.0] [0.0 20.0]]
+             (pts (path/align-content content #{0 1 2} :hleft))))
+    ;; align to horizontal center: x becomes the bbox center
+    (t/is (= [[5.0 0.0] [5.0 2.0] [5.0 20.0]]
+             (pts (path/align-content content #{0 1 2} :hcenter))))
+    ;; align to the top edge: every selected y becomes the min y
+    (t/is (= [[0.0 0.0] [10.0 0.0] [4.0 0.0]]
+             (pts (path/align-content content #{0 1 2} :vtop))))))
+
+(t/deftest segment-align-content-partial-and-guard
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 2.0}}
+                  {:command :line-to :params {:x 4.0 :y 20.0}}])
+        pts     (fn [c] (mapv (comp (juxt :x :y) :params) (vec c)))]
+    ;; only the selected nodes align; the unselected node stays put
+    (t/is (= [[0.0 0.0] [0.0 2.0] [4.0 20.0]]
+             (pts (path/align-content content #{0 1} :hleft))))
+    ;; fewer than two selected nodes is a no-op
+    (t/is (= (pts content)
+             (pts (path/align-content content #{0} :hleft))))))
+
+(t/deftest segment-align-content-moves-handles
+  ;; a selected node's attached handles move rigidly with its anchor
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :curve-to :params {:c1x 2.0 :c1y 1.0 :c2x 8.0 :c2y 1.0 :x 10.0 :y 0.0}}])
+        result  (vec (path/align-content content #{0 1} :vtop))]
+    ;; both nodes already share y=0, so vtop is a no-op on the anchors and
+    ;; leaves the handles untouched
+    (t/is (= {:c1x 2.0 :c1y 1.0 :c2x 8.0 :c2y 1.0 :x 10.0 :y 0.0}
+             (:params (second result))))))
+
+(t/deftest segment-distribute-content
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 3.0 :y 5.0}}
+                  {:command :line-to :params {:x 10.0 :y 9.0}}])
+        pts     (fn [c] (mapv (comp (juxt :x :y) :params) (vec c)))]
+    ;; the middle node is spaced evenly between the two extremes on x
+    (t/is (= [[0.0 0.0] [5.0 5.0] [10.0 9.0]]
+             (pts (path/distribute-content content #{0 1 2} :horizontal))))
+    ;; fewer than three selected nodes is a no-op
+    (t/is (= (pts content)
+             (pts (path/distribute-content content #{0 1} :horizontal))))))
+
+(t/deftest segment-distribute-content-keeps-coincident-nodes-together
+  ;; two selected nodes at the same position count as a single node: they get
+  ;; the same delta and stay coincident (a closed loop's seam does not open)
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 3.0 :y 7.0}}
+                  {:command :line-to :params {:x 3.0 :y 7.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}])
+        pts     (fn [c] (mapv (comp (juxt :x :y) :params) (vec c)))]
+    ;; three distinct positions (0, 3, 10); the coincident pair is one group
+    ;; centred at x=5 and both nodes move there together, staying coincident
+    (t/is (= [[0.0 0.0] [5.0 7.0] [5.0 7.0] [10.0 0.0]]
+             (pts (path/distribute-content content #{0 1 2 3} :horizontal))))
+    ;; only two distinct positions among the selection is a no-op
+    (t/is (= (pts content)
+             (pts (path/distribute-content content #{1 2 3} :horizontal))))))
+
 (t/deftest helpers-fit-curve-single-curve
   ;; samples of one gentle cubic are fitted back with a single curve
   (let [curve   [(gpt/point 0.0 0.0) (gpt/point 30.0 0.0)

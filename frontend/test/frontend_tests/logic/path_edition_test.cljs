@@ -356,6 +356,39 @@
     (t/is (= (gpt/point 2 5) (path/get-handler-point content' 1 :c1)))
     (t/is (= (gpt/point 12 5) (path/get-handler-point content' 2 :c1)))))
 
+(t/deftest align-nodes-aligns-selected-nodes-to-an-edge
+  ;; the align-nodes tool moves the selected nodes' anchors onto a common edge
+  ;; of their bounding box, updating the drawing copy's content
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 4}}
+                   {:command :line-to :params {:x 4 :y 20}}])
+        state    (selectable-path-state id content
+                                        {:nodes #{0 1 2} :segments #{} :handlers #{}})
+        state'   (ptk/update (path.tools/align-nodes :hleft) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; every selected node's x becomes the min x (0), y is untouched
+    (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 0 4)  (path.helpers/node-position content' 1)))
+    (t/is (= (gpt/point 0 20) (path.helpers/node-position content' 2)))))
+
+(t/deftest distribute-nodes-spaces-selected-nodes-evenly
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 3 :y 5}}
+                   {:command :line-to :params {:x 10 :y 9}}])
+        state    (selectable-path-state id content
+                                        {:nodes #{0 1 2} :segments #{} :handlers #{}})
+        state'   (ptk/update (path.tools/distribute-nodes :horizontal) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; the middle node is centered on x between the two extremes (0 and 10)
+    (t/is (= (gpt/point 5 5)  (path.helpers/node-position content' 1)))
+    ;; the extreme nodes stay put
+    (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 10 9) (path.helpers/node-position content' 2)))))
+
 (defn- run-handle-drawing-end
   "Drives the handle-drawing continuation with an ::end-edition carrying
   the given :restart? flag and calls back with the drawing-end emissions."

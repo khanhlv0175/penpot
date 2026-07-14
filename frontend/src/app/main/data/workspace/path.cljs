@@ -57,6 +57,8 @@
 (dm/export tools/set-add-nodes)
 (dm/export tools/toggle-add-nodes)
 (dm/export tools/flip-nodes)
+(dm/export tools/align-nodes)
+(dm/export tools/distribute-nodes)
 
 ;; Undo/redo
 (dm/export undo/undo-path)

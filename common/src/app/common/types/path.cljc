@@ -405,6 +405,20 @@
   (let [content (impl/path-data content)]
     (segment/flip-content content indices axis)))
 
+(defn align-content
+  "Aligns the selected node `indices` (and their handles) to a common edge or
+  center of their bounding box. `axis` is one of `segment/align-nodes-axis`."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (segment/align-content content indices axis)))
+
+(defn distribute-content
+  "Distributes the selected node `indices` evenly along `axis` (`:horizontal`
+  or `:vertical`) between the two extreme selected nodes."
+  [content indices axis]
+  (let [content (impl/path-data content)]
+    (segment/distribute-content content indices axis)))
+
 (defn- calc-bool-content*
   "Calculate the boolean content from shape and objects. Returns plain
   vector of segments"

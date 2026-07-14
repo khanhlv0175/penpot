@@ -103,6 +103,37 @@
         (-> (st/set-content state content)
             (update-in (st/get-path-location state) path/update-geometry))))))
 
+(defn align-nodes
+  "Aligns the selected nodes (and their handles) to a common edge or center of
+  their bounding box. `axis` is one of `:hleft`/`:hcenter`/`:hright`/`:vtop`/
+  `:vcenter`/`:vbottom`. Needs at least two selected nodes. Indices are
+  preserved, so the selection stays valid."
+  [axis]
+  (ptk/reify ::align-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id       (st/get-path-id state)
+            content  (st/get-path state :content)
+            selected (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+            content  (path/align-content content selected axis)]
+        (-> (st/set-content state content)
+            (update-in (st/get-path-location state) path/update-geometry))))))
+
+(defn distribute-nodes
+  "Distributes the selected nodes evenly along `axis` (`:horizontal` or
+  `:vertical`) between the two extreme selected nodes. Needs at least three
+  selected nodes. Indices are preserved."
+  [axis]
+  (ptk/reify ::distribute-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id       (st/get-path-id state)
+            content  (st/get-path state :content)
+            selected (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+            content  (path/distribute-content content selected axis)]
+        (-> (st/set-content state content)
+            (update-in (st/get-path-location state) path/update-geometry))))))
+
 (defn toggle-snap []
   (ptk/reify ::toggle-snap
     ptk/UpdateEvent

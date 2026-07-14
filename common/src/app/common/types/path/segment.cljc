@@ -375,6 +375,129 @@
         (impl/from-plain
          (into [] (map-indexed flip-cmd) content))))))
 
+(def align-nodes-axis
+  "Valid axes for `align-content`."
+  #{:hleft :hcenter :hright :vtop :vcenter :vbottom})
+
+(def distribute-nodes-axis
+  "Valid axes for `distribute-content`."
+  #{:horizontal :vertical})
+
+(defn- selected-node-entries
+  "Vector of `[index point]` for the selected, non-close-path nodes."
+  [content indices]
+  (into []
+        (comp (filter (fn [[i seg]]
+                        (and (contains? indices i)
+                             (not= :close-path (:command seg)))))
+              (map (fn [[i seg]] [i (helpers/segment->point seg)])))
+        (d/enumerate content)))
+
+(defn- translate-nodes
+  "Translates each selected node's anchor and its attached handles by the
+  per-node delta in `deltas` (index -> gpt point). Handle ownership matches
+  `flip-content`: `c1` of command i belongs to node i-1 and `c2` to node i, so
+  a node's own handles (`c2` of its command and `c1` of the next) move rigidly
+  with it. Indices are unchanged. Returns plain content."
+  [content indices deltas]
+  (let [node-sel? (fn [i] (contains? indices i))
+        add-delta (fn [params xk yk delta]
+                    (if (and delta (contains? params xk))
+                      (-> params
+                          (update xk + (:x delta))
+                          (update yk + (:y delta)))
+                      params))
+        move-cmd  (fn [i {:keys [command params] :as seg}]
+                    (let [curve? (= :curve-to command)
+                          params (cond-> params
+                                   (and (not= :close-path command) (node-sel? i))
+                                   (add-delta :x :y (get deltas i))
+
+                                   (and curve? (node-sel? (dec i)))
+                                   (add-delta :c1x :c1y (get deltas (dec i)))
+
+                                   (and curve? (node-sel? i))
+                                   (add-delta :c2x :c2y (get deltas i)))]
+                      (assoc seg :params params)))]
+    (into [] (map-indexed move-cmd) content)))
+
+(defn align-content
+  "Aligns the selected node `indices` (and their handles) to a common edge or
+  center of the selected nodes' bounding box. `axis` is one of
+  `align-nodes-axis`. Needs at least two selected nodes, otherwise a no-op.
+  Indices are preserved."
+  [content indices axis]
+  (let [content (vec content)
+        indices (set indices)
+        entries (selected-node-entries content indices)]
+    (if (< (count entries) 2)
+      (impl/from-plain content)
+      (let [pts    (map second entries)
+            xs     (map :x pts)
+            ys     (map :y pts)
+            minx   (reduce min xs)
+            maxx   (reduce max xs)
+            miny   (reduce min ys)
+            maxy   (reduce max ys)
+
+            [coord target]
+            (case axis
+              :hleft   [:x minx]
+              :hcenter [:x (/ (+ minx maxx) 2.0)]
+              :hright  [:x maxx]
+              :vtop    [:y miny]
+              :vcenter [:y (/ (+ miny maxy) 2.0)]
+              :vbottom [:y maxy])
+
+            deltas
+            (into {}
+                  (map (fn [[i p]]
+                         [i (if (= coord :x)
+                              (gpt/point (- target (:x p)) 0)
+                              (gpt/point 0 (- target (:y p))))]))
+                  entries)]
+        (impl/from-plain (translate-nodes content indices deltas))))))
+
+(defn distribute-content
+  "Distributes the selected node `indices` evenly along `axis` (`:horizontal`
+  or `:vertical`) between the two extreme selected nodes. Coincident selected
+  nodes (same position, e.g. a closed loop's seam) count as a **single** node
+  and share one delta, so distributing never pulls them apart. Needs at least
+  three distinct selected positions, otherwise a no-op. Indices are preserved."
+  [content indices axis]
+  (let [content     (vec content)
+        indices     (set indices)
+        entries     (selected-node-entries content indices)
+        horizontal? (= axis :horizontal)
+        coord       (fn [p] (if horizontal? (:x p) (:y p)))
+
+        ;; group the selected indices by position so coincident nodes act as
+        ;; one node: they get the same delta and stay together
+        groups      (->> entries
+                         (group-by (fn [[_ p]] [(:x p) (:y p)]))
+                         (mapv (fn [[_ es]]
+                                 {:point   (second (first es))
+                                  :indices (mapv first es)})))]
+    (if (< (count groups) 3)
+      (impl/from-plain content)
+      (let [sorted (sort-by (comp coord :point) groups)
+            lo     (coord (:point (first sorted)))
+            hi     (coord (:point (last sorted)))
+            step   (/ (- hi lo) (dec (count sorted)))
+
+            deltas
+            (into {}
+                  (comp
+                   (map-indexed
+                    (fn [k {:keys [point indices]}]
+                      (let [target (+ lo (* k step))
+                            d      (- target (coord point))
+                            dp     (if horizontal? (gpt/point d 0) (gpt/point 0 d))]
+                        (map (fn [i] [i dp]) indices))))
+                   cat)
+                  sorted)]
+        (impl/from-plain (translate-nodes content indices deltas))))))
+
 (defn make-corner-point
   "Changes the content to make a point a 'corner'"
   [content point]

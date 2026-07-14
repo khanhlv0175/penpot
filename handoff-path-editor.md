@@ -868,19 +868,50 @@ Work planned on top of the polished editor, with required groundwork:
    verified by no-regression (focused suite 41 tests / 110 assertions, 0 failures), `clj-kondo`
    0/0, `cljfmt` clean, compiler `:ok`. Live sub-pixel confirmation deferred (blocked by the
    flaky browser session this session).
-- [ ] **Feature 27 — alignment / distribute options for path nodes.** The align
-   (left/center/right/top/middle/bottom) and distribute (horizontal/vertical) actions should
-   operate on the **selected path nodes** during path edition, aligning/distributing node
-   positions instead of whole shapes. Branch the alignment/distribute actions on path
-   edition: resolve selected `:nodes` → positions, compute the same align/distribute math,
-   and write back through the content-modifier / `process-path-tool` pipeline. Surfaced by
-   feature 28 (the options panel must show these controls during edition).
-- [ ] **Feature 28 — right options panel content during path editing.** The right-side
-   options menu currently shows nothing while editing a path. It should **hide** boolean
-   options, layout, and export; and **show** the distribute/alignment options (feature 27),
-   measurements, fill, stroke, shadow, and blur. Pointer: the options component
-   (`ui/workspace/sidebar/options.cljs` + shape-specific options menus) gates sections per
-   shape/selection — add a path-edition branch that renders exactly this subset.
+- [x] **Feature 27 — alignment / distribute options for path nodes.** Completed 2026-07-14.
+   The align (hleft/hcenter/hright/vtop/vcenter/vbottom) and distribute (horizontal/vertical)
+   actions operate on the **selected path nodes** during path edition. Common
+   (`segment/align-content` + `distribute-content`, wrapped by `path/…`): mirror
+   `flip-content`'s handle ownership (`c1` of command i belongs to node i-1, `c2` to node i)
+   via a shared `translate-nodes` that moves each selected node's anchor **and its attached
+   handles rigidly** by a per-node delta — align sets the relevant coord to the bbox
+   edge/center (needs ≥2 nodes), distribute spaces the sorted nodes evenly between the two
+   extremes (needs ≥3). Indices are preserved, so the selection stays valid (no remap).
+   Frontend: `tools/align-nodes`/`distribute-nodes` events (mirror `flip-nodes` — set-content
+   + update-geometry on the drawing copy), re-exported from `path.cljs`. The align buttons
+   (`menus/align.cljs` `align-options*`) gained a `path-edit?`/`node-count` mode: while editing
+   they emit the node tools and enable on 2+/3+ selected nodes instead of `dw/align-objects`.
+   Verified: 4 common pure-fn tests (`segment-align-content{,-partial-and-guard,-moves-handles}`,
+   `segment-distribute-content`) + 2 frontend store tests
+   (`align-nodes-aligns-selected-nodes-to-an-edge`, `distribute-nodes-spaces-selected-nodes-evenly`,
+   exercising the event → drawing-content path); common suite 144/462, frontend focused 43/116,
+   0 failures; `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`.
+   **Refinement (2026-07-14): coincident nodes distribute as one.** `distribute-content` groups
+   the selected indices by position, so nodes sharing a position (e.g. a line-closed loop's
+   seam, where the start and the trailing line-to coincide) count as a **single** node — they
+   receive the same delta and stay together instead of splitting the path open. The `≥3` guard
+   now counts **distinct positions**. Align was already correct for coincident nodes (they move
+   to the same target line together), so it is unchanged. Test
+   `segment-distribute-content-keeps-coincident-nodes-together`; common suite 145/464.
+- [x] **Feature 28 — right options panel content during path editing.** Completed 2026-07-14.
+   The panel looked empty during edition because the drawing copy populates
+   `[:workspace-drawing :object]`, so `options/design-menu*`'s `cond` fell to the
+   `(d/not-empty? drawing)` → `drawing-options*` branch. Now `design-menu*` detects
+   path editing (new `refs/workspace-edit-path` ⇒ `(get edit-path edition)`; scoped to
+   **existing-path** edition via `:edition`, not new-path creation) and: renders
+   `align-options*` with `:path-edit?`/`:node-count` (feature 27), **hides** `bool-options*`
+   (wrapped in `when-not path-editing?`), and adds a path-editing branch **before** the drawing
+   branch that renders the new `options/shapes/path/path-edition-options*` — measures, fill,
+   stroke, shadow, blur only (layout, export, constraints, layer, svg-attrs, boolean omitted).
+   The menus target the **stored** shape `(get objects edition)` (real fills/strokes, not the
+   drawing copy). The align/distribute row is **always shown while editing a path** (its buttons
+   just disable when too few nodes are selected): `align-options*`'s visibility gate became
+   `(when (or path-edit? (not (and disabled-align disabled-distribute))) …)`, so it no longer
+   hides when nothing is selected mid-edit. `clj-kondo` 0/0, `cljfmt` clean, compiler `:ok`.
+   **Live UI not verified this session** — the browser workspace was stuck read-only
+   (WebGL-context / options-mode state that survived reloads), which renders the read-only
+   inspect panel and bypasses `design-menu*` entirely; the rendering wiring is straightforward
+   but a by-hand pass is still owed.
 - [ ] **Feature 29 — visual (arc-length) half-point for mid-segment node insertion.**
    Feature 16 inserts at the Bézier parameter `t = 0.5`, but for many curves that is **not**
    the visual midpoint. Replace the t=0.5 midpoint (`helpers/segment-mid-point` and the
@@ -936,9 +967,10 @@ for features 1–3, 8, 10, and 11 is complete.
 **Remaining work:**
 
 - Features 1–24 are done or dropped (features 4 and 5 dropped by user decision).
-- **New batch requested 2026-07-14 — partially done:** **Features 25 & 26 done** (half-pixel
-  node movement above 300% zoom; no pixel-snap for handler drags — see §6). **Not yet
-  started:** features 27–33 (node alignment/distribute, path-edition options panel, arc-length
+- **New batch requested 2026-07-14 — partially done:** **Features 25–28 done** (half-pixel
+  node movement above 300% zoom; no pixel-snap for handler drags; node alignment/distribute;
+  path-edition options panel — see §6; feature 28's live UI still owes a by-hand pass, blocked
+  by a read-only browser this session). **Not yet started:** features 29–33 (arc-length
   half-point insertion, segment flip/delete/merge, temporary 80% fill opacity,
   snap-on-by-default, Ctrl+D / Alt+drag duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:

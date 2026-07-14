@@ -144,3 +144,43 @@
                         :page-id page-id
                         :file-id file-id}]]))
 
+(mf/defc path-edition-options*
+  "Options shown while editing a path's nodes (feature 28): measurements, fill,
+  stroke, shadow and blur. Layout, export, constraints, boolean and svg-attrs
+  are intentionally omitted; alignment/distribute is rendered separately by the
+  design menu's `align-options*`."
+  [{:keys [shape]}]
+  (let [id     (dm/get-prop shape :id)
+        type   (dm/get-prop shape :type)
+        ids    (mf/with-memo [id] [id])
+        shapes (mf/with-memo [shape] [shape])
+
+        applied-tokens
+        (get shape :applied-tokens)
+
+        measure-values
+        (select-keys shape measure-attrs)
+
+        stroke-values
+        (select-keys shape stroke-attrs)]
+
+    [:*
+     [:> measures-menu* {:ids ids
+                         :type type
+                         :applied-tokens applied-tokens
+                         :values measure-values
+                         :shapes shapes}]
+     [:> fill/fill-menu*
+      {:ids ids
+       :type type
+       :values shape
+       :applied-tokens applied-tokens}]
+     [:> stroke-menu* {:ids ids
+                       :type type
+                       :show-caps true
+                       :values stroke-values
+                       :applied-tokens applied-tokens}]
+     [:> shadow-menu* {:ids ids :values (get shape :shadow)}]
+     [:> blur-menu* {:ids ids
+                     :values (select-keys shape [:blur :background-blur])}]]))
+

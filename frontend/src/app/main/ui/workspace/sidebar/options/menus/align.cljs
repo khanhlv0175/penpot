@@ -8,6 +8,7 @@
   (:require-macros [app.main.style :as stl])
   (:require
    [app.main.data.workspace :as dw]
+   [app.main.data.workspace.path :as dwdp]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.store :as st]
    [app.main.ui.icons :as deprecated-icon]
@@ -16,30 +17,48 @@
    [rumext.v2 :as mf]))
 
 (mf/defc align-options*
-  [{:keys [shapes objects]}]
-  (let [disabled-align
-        (not (dw/can-align? shapes objects))
+  ;; During path edition (`path-edit?`) the actions align/distribute the
+  ;; selected path nodes instead of whole shapes: enablement is driven by
+  ;; `node-count` (align needs 2+, distribute 3+) and the buttons emit the
+  ;; node-based path tools.
+  [{:keys [shapes objects path-edit? node-count]}]
+  (let [node-count (or node-count 0)
+
+        disabled-align
+        (if path-edit?
+          (< node-count 2)
+          (not (dw/can-align? shapes objects)))
 
         disabled-distribute
-        (not (dw/can-distribute? shapes))
+        (if path-edit?
+          (< node-count 3)
+          (not (dw/can-distribute? shapes)))
 
         align-objects
         (mf/use-fn
+         (mf/deps path-edit?)
          (fn [event]
            (let [value (-> (dom/get-current-target event)
                            (dom/get-data "value")
                            (keyword))]
-             (st/emit! (dw/align-objects value)))))
+             (st/emit! (if path-edit?
+                         (dwdp/align-nodes value)
+                         (dw/align-objects value))))))
 
         distribute-objects
         (mf/use-fn
+         (mf/deps path-edit?)
          (fn [event]
            (let [value (-> (dom/get-current-target event)
                            (dom/get-data "value")
                            (keyword))]
-             (st/emit! (dw/distribute-objects value)))))]
+             (st/emit! (if path-edit?
+                         (dwdp/distribute-nodes value)
+                         (dw/distribute-objects value))))))]
 
-    (when-not (and disabled-align disabled-distribute)
+    ;; While editing a path the row is always shown (buttons just disable when
+    ;; too few nodes are selected); otherwise it hides when nothing applies.
+    (when (or path-edit? (not (and disabled-align disabled-distribute)))
       [:div {:class (stl/css :align-options)}
        [:div {:class (stl/css :align-group-horizontal)}
         [:button {:class (stl/css-case :align-button true
