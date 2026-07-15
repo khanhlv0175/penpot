@@ -1,0 +1,106 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC Sucursal en España SL
+
+.wrapper {
+  position: fixed;
+  padding: var(--sp-s);
+  border-radius: var(--sp-m);
+  border: var(--sp-xxs) solid var(--color-background-quaternary);
+  box-shadow: 0 0 var(--sp-s) 0 rgb(0 0 0 / 30%);
+  overflow: hidden;
+  min-inline-size: 25px;
+  min-block-size: 200px;
+  max-inline-size: 90vw;
+  max-block-size: 90vh;
+  resize: both;
+  user-select: none;
+  background-color: var(--panel-background-color);
+  color: var(--color-foreground-secondary);
+  z-index: var(--z-index-set);
+
+}
+
+.inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  block-size: 100%;
+  padding: var(--sp-s);
+}
+
+.header {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  justify-content: space-between;
+  border-block-end: var(--sp-xxs) solid var(--color-background-quaternary);
+  padding-block-end: var(--sp-xxs);
+  cursor: grab;
+  touch-action: none;
+}
+
+.wrapper.is-dragging .header {
+  cursor: grabbing;
+}
+
+.title {
+  font-size: var(--font-size-s);
+  font-weight: var(--font-weight-medium);
+  margin: 0;
+  margin-inline-end: var(--sp-xxs);
+}
+
+.canvas {
+  flex: 1;
+  min-block-size: 0;
+  overflow: auto;
+  padding-block-start: var(--sp-s);
+}
+
+.canvas-svg {
+  display: block;
+  block-size: 100%;
+  min-inline-size: 100%;
+}
+
+.selection-preview-box {
+  fill: black;
+  stroke: var(--color-background-quaternary);
+  stroke-width: 2;
+
+  &.selected {
+    stroke: var(--assets-component-hightlight);
+  }
+}
+
+.selection-preview-icon {
+  --icon-stroke-color: var(--color-foreground-secondary);
+  display: block;
+
+  &.component {
+    --icon-stroke-color: var(--color-accent-secondary);
+  }
+}
+
+.selection-preview-text {
+  fill: var(--color-static-white);
+  font-size: var(--font-size-s);
+}
+
+.info-labels-bg {
+  fill: var(--color-background-quaternary);
+}
+
+.info-text {
+  fill: var(--color-static-white);
+  font-size: 12px;
+  text-anchor: end;
+}
+
+::-webkit-resizer {
+  display: none;
+}

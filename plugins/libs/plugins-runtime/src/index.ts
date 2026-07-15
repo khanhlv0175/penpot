@@ -10,6 +10,7 @@ import {
 
 // Export the plugin error checker so the frontend can identify plugin errors
 export { isPluginError } from './lib/create-sandbox.js';
+export { createModal } from './lib/create-modal.js';
 
 import type { Context } from '@penpot/plugin-types';
 
