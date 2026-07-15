@@ -1101,9 +1101,10 @@ for features 1–3, 8, 10, and 11 is complete.
   group's resolved fill so it no longer goes transparent — see §5).
 - **Feature 34 — keyboard-modifier interaction matrix — specified AND implemented
   2026-07-15 (uncommitted).** The complete spec and the implementation summary live in
-  **§14**. Still open there: the per-action **cursor set** (user will define it) and the
-  **live by-hand pass** over the whole matrix. It removed feature 17, superseded feature
-  19's alt-rejoin, and changed feature 33's node-duplication geometry (Ctrl+D included).
+  **§14**. It removed feature 17, superseded feature 19's alt-rejoin, and changed
+  feature 33's node-duplication geometry (Ctrl+D included). **The per-cell cursor
+  mapping is now also implemented (2026-07-15, user-provided spec — see §15).** Still
+  open: the **live by-hand pass** over the whole matrix + cursors.
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of
@@ -1593,9 +1594,20 @@ Shift = 15° constraint from the previous point, uniformly (see general rules).
    **immediately at pointer-down** (the removal happens whether or not the user then
    drags; there is no drag action for those combos). Canvas clicks with modifiers keep
    the no-modifier behavior (the draw loop does not inspect modifiers).
-3. **Cursor set** — still open; the user will define per-action cursors. The
-   insert-anywhere preview already reacts to the live platform modifier
-   (`ms/keyboard-mod`), which is the same signal a per-cell cursor should key on.
+3. **Cursor set** — assets landed 2026-07-15: 12 new cursor SVGs (`draw`,
+   `draw-add`, `draw-node`, `draw-remove`, `move`, `move-add`, `move-copy`,
+   `move-curve`, `move-handles`, `move-move`, `move-node`, `move-remove`) in
+   `frontend/resources/images/cursors/`, normalized to the existing cursor
+   structure (bare `<svg xmlns fill="none" viewBox="0 0 16 16">`, no
+   width/height/clip-path/defs; content wrapped in a `scale()` group because
+   `cursor-ref` re-wraps content in a fixed 16-unit viewBox and would clip the
+   originals' 17/21-unit coordinates). Registered as statics in `cursors.cljs`
+   (hotspot 0 0, the pointer/pen tip) and `css_cursors.cljs`, so
+   `(cur/get-static "move-node")` etc. work. Validated live on the ws0 dev
+   build: all 12 `.cursor-*` classes compute to `url("data:image/svg+xml,…")
+   0 0, auto` and every data-URI renders visibly/unclipped.
+   **Per-cell mapping implemented 2026-07-15 (same session as the user's
+   cursor spec) — see §15 for the full mapping and implementation.**
 4. **Weld onto the current subpath's own start** — the draw-mode no-modifier node click
    keeps routing through `close-path-drag-start` (which always accepted any node
    position), so the close-on-start-node flow and bug 12's close-loops treatment are
@@ -1708,3 +1720,72 @@ suite **54 tests / 146 assertions, 0 failures** (renamed handler-mode tests
 `duplicate-selection-content-…`). **Owed:** the live by-hand pass over the whole matrix
 (hover preview with ctrl, curve-config drag feel, draw-mode weld + pending-clear, the
 four handler modes, mod+alt no-ops, removals in both modes) and the cursor set.
+
+## 15. Feature 34 cursors — per-cell mapping (implemented 2026-07-15, uncommitted)
+
+The user provided the cursor definitions this session; implemented the same day.
+Closes §14 open point 3. Cursor names below are the 12 static assets from §14
+(`cur/get-static`). Three layers:
+
+1. **Viewport default** (shared `hooks/setup-cursor`, both viewports): path **draw**
+   mode / pen tool → `draw` (replaces the old `pen` cursor for paths; the `:curve`
+   tool keeps `pencil`); path **move** mode (`path-editing?`, after the drawing-tool
+   branches) → `move`. New `utils/get-cursor` keys `:draw-path`/`:edit-path`. The
+   redundant `(not path-editing?)` in the alt-duplicate branch was dropped (the new
+   branch precedes it).
+2. **Hover cursors** (`editor.cljs`): pure fns `node-cursor` / `segment-cursor` /
+   `handler-cursor` map `(edit-mode, live modifiers, selected?, …)` → cursor name;
+   each element passes it as a `cursor` prop replacing the old static
+   `pen-node`/`pointer-node`/`pointer-move` classes (`pointer-node` is still used by
+   feature 9's line endpoints in `viewport/selection.cljs`). `path-editor*` subscribes
+   to `(rx/combine-latest ms/keyboard-shift ms/keyboard-mod ms/keyboard-alt)` into a
+   `modifiers*` use-state, so cursors react to pressing/releasing modifiers without
+   pointer movement. **Trap found live:** the subscription callback closes over the
+   first-render `use-state` cursor, whose deref always returns the initial value — a
+   `(when (not= value @modifiers*) …)` guard therefore swallowed every key *release*
+   (downs rendered, ups didn't). Removed the guard (the keyboard streams are already
+   distinct-contiguous, so emissions only happen on real changes).
+   - Move node: `move-node`; selected → `move-move`; shift ∧ some node selected →
+     `move-add`; ctrl → `move-handles`; alt → `move-copy`; ctrl+alt → `draw-remove`
+     (unspecified in the user spec; inferred from the segment/draw removal cells).
+   - Move segment: no class (inherits viewport `move`); selected → `move-move`; near
+     middle w/ insert preview → `draw-add`; shift → `move-add`; ctrl → `move-curve`;
+     alt → `move-copy`; ctrl+alt → `draw-remove`.
+   - Handler (both modes): `move`; shift ∧ not selected (move mode) → `move-add`;
+     ctrl or alt → `move-remove`; ctrl+alt → `move` (no-op cell).
+   - Draw node: `draw-node`; ctrl → `move-handles`; alt / ctrl+alt → `draw-remove`.
+   - Draw segment: `draw-add`; ctrl → `move-curve`; alt / ctrl+alt → `draw-remove`.
+   - **Insert-preview gating tightened alongside:** the move-mode hover preview now
+     also hides while shift or alt are held (those clicks select/duplicate, never
+     insert — matches the click branch's existing `when-not shift?` guard).
+3. **Drag cursors** (`edition.cljs` `set-drag-cursor`/`clear-drag-cursor`): the drag
+   branch of every dispatcher emits `set-drag-cursor` as its first event; the state
+   lives at `[:edit-path id :drag-cursor]` and **self-clears** via the event's watch
+   (`mse/drag-stopper` ∪ `finish-edition?` → `clear-drag-cursor`), so no drag flow
+   needs explicit cleanup (covers the curve-config empty-guard path too). While set,
+   it overrides both the viewport cursor (passed as a new `setup-cursor` arg from
+   `path-bar-state`, so it works during creation too) and every element's hover
+   cursor (`(or drag-cursor …)` in `path-editor*`).
+   - Move mode: node drag `move-move` / ctrl `move-handles` / alt `move-copy`;
+     segment drag `move-move` / ctrl `move-curve` / alt `move-copy`; handler drag
+     `move-move` (smart) / `move-handles` (mirror, independent, aligned).
+   - Draw mode: node ctrl (curve-config) `move-handles`; segment ctrl (bend)
+     `move-curve`; the no-modifier weld/insert flows thread a cursor through new
+     arities `close-path-drag-start [position cursor]` / `start-path-from-point
+     [position cursor]` (default `draw-node`; the segment dispatcher passes
+     `draw-add`). The canvas add-node drag keeps the viewport `draw` default.
+
+**Verification (2026-07-15):** `clj-kondo` 0/0, `cljfmt` clean, main build `:ok`,
+frontend focused suite 54/146 0 failures (root-owned `.shadow-cljs/builds/test` had to
+be sudo-removed again — same stale-cache trap as §7). Live on the ws0 WASM dev build
+(store-driven, real DOM): pen tool → viewport `cursor-draw`; store-entered move-mode
+edition → viewport `cursor-move`, nodes `cursor-move-node`, handlers `cursor-move`,
+segments class-less; store-fed keyboard events cycled ctrl/alt/ctrl+alt/shift down
+AND up correctly on all element kinds (matrix cells verified: ctrl →
+handles/curve/remove, alt → copy/copy/remove, ctrl+alt → draw-remove/draw-remove/move,
+shift → handler `move-add`); every helper-fn cell checked against the spec via
+page-evaluated calls; `set-drag-cursor` flipped viewport+node+handler to
+`cursor-move-copy` and a Blur (drag-stopper) cleared it; exit left clean state, no
+exception. **Owed:** the by-hand pass with real pointer gestures (hover transitions,
+drag cursors during actual drags, draw-mode cells — synthetic key/pointer events can't
+drive hover, and entering edit mode needed store events).

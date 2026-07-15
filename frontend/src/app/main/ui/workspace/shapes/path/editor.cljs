@@ -42,9 +42,55 @@
 (def gray-color "var(--df-secondary)")
 (def selected-segment-color "#F49EF7")
 
+;; Per-cell hover cursors of the modifier interaction matrix: each returns the
+;; static cursor name for hovering that element kind given the edit mode and
+;; the live keyboard modifiers, or nil to inherit the viewport default.
+
+(defn- node-cursor
+  [edit-mode {:keys [shift? mod? alt?]} is-selected any-node-selected?]
+  (if (= edit-mode :draw)
+    (cond
+      ^boolean alt? "draw-remove"
+      ^boolean mod? "move-handles"
+      :else         "draw-node")
+    (cond
+      (and ^boolean mod? ^boolean alt?) "draw-remove"
+      ^boolean mod?                     "move-handles"
+      ^boolean alt?                     "move-copy"
+      (and ^boolean shift?
+           ^boolean any-node-selected?) "move-add"
+      ^boolean is-selected              "move-move"
+      :else                             "move-node")))
+
+(defn- segment-cursor
+  [edit-mode {:keys [shift? mod? alt?]} is-selected insert-preview?]
+  (if (= edit-mode :draw)
+    (cond
+      ^boolean alt? "draw-remove"
+      ^boolean mod? "move-curve"
+      :else         "draw-add")
+    (cond
+      (and ^boolean mod? ^boolean alt?) "draw-remove"
+      ^boolean mod?                     "move-curve"
+      ^boolean alt?                     "move-copy"
+      ^boolean shift?                   "move-add"
+      ^boolean insert-preview?          "draw-add"
+      ^boolean is-selected              "move-move"
+      :else                             nil)))
+
+(defn- handler-cursor
+  [edit-mode {:keys [shift? mod? alt?]} is-selected]
+  (cond
+    (and ^boolean mod? ^boolean alt?) "move"
+    (or ^boolean mod? ^boolean alt?)  "move-remove"
+    (and (= edit-mode :move)
+         ^boolean shift?
+         (not ^boolean is-selected))  "move-add"
+    :else                             "move"))
+
 (mf/defc path-point*
   {::mf/private true}
-  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-new]}]
+  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-new cursor]}]
   (let [{:keys [x y]} position
 
         is-draw (= edit-mode :draw)
@@ -113,14 +159,13 @@
                :pointer-events (cond ^boolean is-preview nil
                                      ^boolean is-new "none"
                                      :else "visible")
-               :class (cond ^boolean is-draw (cur/get-static "pen-node")
-                            ^boolean is-move (cur/get-static "pointer-node"))
+               :class (when (some? cursor) (cur/get-static cursor))
                :style {:stroke-width 0
                        :fill "none"}}]]))
 
 (mf/defc path-handler*
   {::mf/private true}
-  [{:keys [index prefix point handler zoom is-selected is-hover snap-angle]}]
+  [{:keys [index prefix point handler zoom is-selected is-hover snap-angle cursor]}]
   (let [x       (dm/get-prop handler :x)
         y       (dm/get-prop handler :y)
 
@@ -195,8 +240,8 @@
                :on-pointer-down on-pointer-down
                :on-pointer-enter on-enter
                :on-pointer-leave on-leave
-               :class (when ^boolean is-interactive
-                        (cur/get-static "pointer-move"))
+               :class (when (and ^boolean is-interactive (some? cursor))
+                        (cur/get-static cursor))
                :style {:fill "none"
                        :stroke-width 0}}]]))
 
@@ -212,7 +257,7 @@
 
 (mf/defc path-segment*
   {::mf/private true}
-  [{:keys [entry zoom edit-mode is-interactive is-selected is-hover]}]
+  [{:keys [entry zoom edit-mode is-interactive is-selected is-hover cursor]}]
   (let [index    (:index entry)
         content  (mf/with-memo [entry] (segment-content entry))
         is-active (or ^boolean is-selected ^boolean is-hover)
@@ -253,6 +298,7 @@
              :on-pointer-enter on-enter
              :on-pointer-leave on-leave
              :pointer-events "stroke"
+             :class (when (some? cursor) (cur/get-static cursor))
              :style {:fill "none"
                      :stroke "transparent"
                      :stroke-width (/ point-radius-active-area zoom)}}]]))
@@ -333,7 +379,8 @@
                 moving-nodes
                 moving-handler
                 hover
-                snap-toggled]}
+                snap-toggled
+                drag-cursor]}
         state
 
         move-mode?
@@ -345,12 +392,23 @@
         hover-point
         (mf/use-state nil)
 
+        ;; Live keyboard modifiers: the hover cursors change when a modifier
+        ;; is pressed or released without moving the pointer.
+        modifiers*
+        (mf/use-state {:shift? false :mod? false :alt? false})
+
+        modifiers
+        (deref modifiers*)
+
         selected-nodes    (get selection :nodes #{})
         selected-segments (get selection :segments #{})
         selected-handlers (get selection :handlers #{})
         hover-nodes       (get hover :nodes #{})
         hover-segments    (get hover :segments #{})
         hover-handlers    (get hover :handlers #{})
+
+        any-node-selected?
+        (boolean (seq selected-nodes))
 
         base-content
         (get shape :content)
@@ -403,17 +461,30 @@
                                   (st/emit! :interrupt)))]
         #(events/unlistenByKey key)))
 
-    ;; In move mode, preview the node that a click would insert: only near a
-    ;; segment's exact middle by default, or anywhere on the path while the
-    ;; platform modifier is held. When a click there would only select, no
-    ;; preview. Keyed on the live modifier so pressing/releasing it updates
-    ;; the preview without moving the pointer.
+    ;; Live keyboard-modifier state for the per-element cursors. The keyboard
+    ;; streams are distinct-contiguous, so this only fires on real changes.
     (hooks/use-stream
      (mf/with-memo []
-       (rx/combine-latest ms/mouse-position ms/keyboard-mod))
+       (rx/combine-latest ms/keyboard-shift ms/keyboard-mod ms/keyboard-alt))
+     (fn [[shift? mod? alt?]]
+       (reset! modifiers* {:shift? (boolean shift?)
+                           :mod?   (boolean mod?)
+                           :alt?   (boolean alt?)})))
+
+    ;; In move mode, preview the node that a click would insert: only near a
+    ;; segment's exact middle by default, or anywhere on the path while the
+    ;; platform modifier is held. When a click there would only select or
+    ;; remove (shift / alt held), no preview. Keyed on the live modifiers so
+    ;; pressing/releasing them updates the preview without moving the pointer.
+    (hooks/use-stream
+     (mf/with-memo []
+       (rx/combine-latest ms/mouse-position ms/keyboard-mod ms/keyboard-shift ms/keyboard-alt))
      (mf/deps base-content zoom move-mode?)
-     (fn [[position mod?]]
-       (if (and ^boolean move-mode? (gpt/point? position))
+     (fn [[position mod? shift? alt?]]
+       (if (and ^boolean move-mode?
+                (not shift?)
+                (not alt?)
+                (gpt/point? position))
          (reset! hover-point
                  (dwp.helpers/insertion-point
                   base-content position
@@ -427,14 +498,19 @@
                      :stroke accent-color
                      :strokeWidth (/ 1 zoom)}}]
      (for [{:keys [index] :as entry} segment-entries]
-       [:> path-segment*
-        {:key (dm/str "segment-" index)
-         :entry entry
-         :zoom zoom
-         :edit-mode edit-mode
-         :is-interactive (or ^boolean move-mode? ^boolean draw-mode?)
-         :is-selected (contains? selected-segments index)
-         :is-hover (contains? hover-segments index)}])
+       (let [is-selected (contains? selected-segments index)
+             is-hover    (contains? hover-segments index)]
+         [:> path-segment*
+          {:key (dm/str "segment-" index)
+           :entry entry
+           :zoom zoom
+           :edit-mode edit-mode
+           :is-interactive (or ^boolean move-mode? ^boolean draw-mode?)
+           :is-selected is-selected
+           :is-hover is-hover
+           :cursor (or drag-cursor
+                       (segment-cursor edit-mode modifiers is-selected
+                                       (and is-hover (some? @hover-point))))}]))
      (when (and preview (not drag-handler))
        [:> path-preview* {:segment preview
                           :from last-p
@@ -487,24 +563,30 @@
                    matching-handler? (matching-handler? content position position-handlers)]
 
                (when (and position handler-position)
-                 [:> path-handler*
-                  {:key (dm/str hindex "-" (d/name prefix))
-                   :point position
-                   :handler handler-position
-                   :index hindex
-                   :prefix prefix
-                   :zoom zoom
-                   :is-selected (contains? selected-handlers [hindex prefix])
-                   :is-hover handler-hover?
-                   :snap-angle (and moving-handler? matching-handler?)
-                   :edit-mode edit-mode}])))]
+                 (let [handler-selected? (contains? selected-handlers [hindex prefix])]
+                   [:> path-handler*
+                    {:key (dm/str hindex "-" (d/name prefix))
+                     :point position
+                     :handler handler-position
+                     :index hindex
+                     :prefix prefix
+                     :zoom zoom
+                     :is-selected handler-selected?
+                     :is-hover handler-hover?
+                     :snap-angle (and moving-handler? matching-handler?)
+                     :edit-mode edit-mode
+                     :cursor (or drag-cursor
+                                 (handler-cursor edit-mode modifiers handler-selected?))}]))))]
 
           [:> path-point* {:index index
                            :position position
                            :zoom zoom
                            :edit-mode edit-mode
                            :is-selected point-selected?
-                           :is-hover point-hover?}]]))
+                           :is-hover point-hover?
+                           :cursor (or drag-cursor
+                                       (node-cursor edit-mode modifiers point-selected?
+                                                    any-node-selected?))}]]))
 
      (when (and prev-handler last-p)
        [:g.prev-handler {:pointer-events "none"}

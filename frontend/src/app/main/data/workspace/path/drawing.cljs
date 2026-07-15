@@ -179,33 +179,36 @@
                (undo/merge-head))))))
 
 (defn close-path-drag-start
-  [position]
-  (ptk/reify ::close-path-drag-start
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (let [content  (st/get-path state :content)
-            handlers (-> (path/get-handlers content)
-                         (get position))
+  ([position]
+   (close-path-drag-start position "draw-node"))
+  ([position cursor]
+   (ptk/reify ::close-path-drag-start
+     ptk/WatchEvent
+     (watch [_ state stream]
+       (let [content  (st/get-path state :content)
+             handlers (-> (path/get-handlers content)
+                          (get position))
 
-            [idx prefix] (when (= (count handlers) 1)
-                           (first handlers))
+             [idx prefix] (when (= (count handlers) 1)
+                            (first handlers))
 
+             drag-events-stream
+             (->> (streams/position-stream state)
+                  (rx/map #(drag-handler position idx prefix %))
+                  (rx/take-until
+                   (rx/merge
+                    (mse/drag-stopper stream)
+                    (rx/filter end-path-event? stream))))]
+
+         (rx/concat
+          (rx/of (add-node position))
+          (streams/drag-stream
+           (rx/concat
+            (rx/of (edition/set-drag-cursor cursor))
             drag-events-stream
-            (->> (streams/position-stream state)
-                 (rx/map #(drag-handler position idx prefix %))
-                 (rx/take-until
-                  (rx/merge
-                   (mse/drag-stopper stream)
-                   (rx/filter end-path-event? stream))))]
-
-        (rx/concat
-         (rx/of (add-node position))
-         (streams/drag-stream
-          (rx/concat
-           drag-events-stream
-           (rx/of (finish-drag))
-           (rx/of (close-path-drag-end))))
-         (rx/of (common/finish-path)))))))
+            (rx/of (finish-drag))
+            (rx/of (close-path-drag-end))))
+          (rx/of (common/finish-path))))))))
 
 (defn close-path-drag-end []
   (ptk/reify ::close-path-drag-end
@@ -214,23 +217,27 @@
       (let [id (st/get-path-id state)]
         (update-in state [:workspace-local :edit-path id] dissoc :prev-handler)))))
 
-(defn start-path-from-point [position]
-  (ptk/reify ::start-path-from-point
-    ptk/WatchEvent
-    (watch [_ state stream]
-      (let [stopper (rx/merge
-                     (mse/drag-stopper stream)
-                     (rx/filter end-path-event? stream))
+(defn start-path-from-point
+  ([position]
+   (start-path-from-point position "draw-node"))
+  ([position cursor]
+   (ptk/reify ::start-path-from-point
+     ptk/WatchEvent
+     (watch [_ state stream]
+       (let [stopper (rx/merge
+                      (mse/drag-stopper stream)
+                      (rx/filter end-path-event? stream))
 
-            drag-events (->> (streams/position-stream state)
-                             (rx/map #(drag-handler %))
-                             (rx/take-until stopper))]
-        (rx/concat
-         (rx/of (add-node position))
-         (streams/drag-stream
-          (rx/concat
-           drag-events
-           (rx/of (finish-drag)))))))))
+             drag-events (->> (streams/position-stream state)
+                              (rx/map #(drag-handler %))
+                              (rx/take-until stopper))]
+         (rx/concat
+          (rx/of (add-node position))
+          (streams/drag-stream
+           (rx/concat
+            (rx/of (edition/set-drag-cursor cursor))
+            drag-events
+            (rx/of (finish-drag))))))))))
 
 (defn make-drag-stream
   [state stream down-event]
@@ -528,7 +535,8 @@
 
           mod?
           (streams/drag-stream
-           (rx/of (edition/curve-config-node-drag index))
+           (rx/of (edition/set-drag-cursor "move-handles")
+                  (edition/curve-config-node-drag index))
            (rx/of (tools/toggle-node-curve index)))
 
           alt?
@@ -581,7 +589,8 @@
                                (not= :close-path (:command (:segment entry))))]
             (streams/drag-stream
              (if bendable?
-               (rx/of (edition/bend-selected-segment index position))
+               (rx/of (edition/set-drag-cursor "move-curve")
+                      (edition/bend-selected-segment index position))
                (rx/empty))
              (rx/of (tools/toggle-segment-curve index))))
 
@@ -592,8 +601,8 @@
               (rx/concat
                (rx/of (edition/create-node-at-position (meta insert-point)))
                (if (some? last-point)
-                 (rx/of (close-path-drag-start insert-point))
-                 (rx/of (start-path-from-point insert-point))))
+                 (rx/of (close-path-drag-start insert-point "draw-add"))
+                 (rx/of (start-path-from-point insert-point "draw-add"))))
               (rx/empty))))))))
 
 (defn check-changed-content

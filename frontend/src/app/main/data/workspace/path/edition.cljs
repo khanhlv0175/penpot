@@ -309,6 +309,32 @@
             node-indices      (helpers/segment-node-indices content selected-segments)]
         (move-node-indices state node-indices from-point to-point)))))
 
+(defn- clear-drag-cursor []
+  (ptk/reify ::clear-drag-cursor
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (d/update-in-when state [:workspace-local :edit-path id] dissoc :drag-cursor)))))
+
+(defn set-drag-cursor
+  "Stores the cursor (a static cursor name) shown while the current pointer
+  gesture lasts; the viewports and the editor elements render it in place of
+  the hover cursors. It clears itself when the drag stops."
+  [cursor]
+  (ptk/reify ::set-drag-cursor
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (d/update-in-when state [:workspace-local :edit-path id] assoc :drag-cursor cursor)))
+
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (->> (rx/merge
+            (mse/drag-stopper stream)
+            (rx/filter streams/finish-edition? stream))
+           (rx/take 1)
+           (rx/map #(clear-drag-cursor))))))
+
 (declare drag-selected-points)
 
 (def duplicate-offset
@@ -387,12 +413,14 @@
 
           mod?
           (streams/drag-stream
-           (rx/of (curve-config-node-drag index))
+           (rx/of (set-drag-cursor "move-handles")
+                  (curve-config-node-drag index))
            (rx/of (tools/toggle-node-curve index)))
 
           alt?
           (streams/drag-stream
            (rx/of
+            (set-drag-cursor "move-copy")
             (when-not selected? (selection/select-node index false))
             (duplicate-and-drag @ms/mouse-position))
            (rx/of (selection/select-node index false)))
@@ -400,6 +428,7 @@
           :else
           (streams/drag-stream
            (rx/of
+            (set-drag-cursor "move-move")
             (when-not selected? (selection/select-node index shift?))
             (drag-selected-points @ms/mouse-position))
            (rx/of (selection/select-node index shift?))))))))
@@ -468,9 +497,10 @@
                                   (not= :close-path (:command (:segment entry))))
                 insert-point (helpers/insertion-point content position threshold true)]
             (streams/drag-stream
-             (if bend?
-               (rx/of (bend-selected-segment index position))
-               (rx/of (drag-selected-segments position)))
+             (rx/of (set-drag-cursor "move-curve")
+                    (if bend?
+                      (bend-selected-segment index position)
+                      (drag-selected-segments position)))
              (if (some? insert-point)
                (rx/of (create-node-at-position (meta insert-point)))
                (rx/empty))))
@@ -478,6 +508,7 @@
           alt?
           (streams/drag-stream
            (rx/of
+            (set-drag-cursor "move-copy")
             (when-not selected? (selection/select-segment index false))
             (duplicate-and-drag position))
            (rx/of (selection/select-segment index false)))
@@ -490,6 +521,7 @@
                                (selection/select-segment index shift?))]
             (streams/drag-stream
              (rx/of
+              (set-drag-cursor "move-move")
               (when-not selected? (selection/select-segment index shift?))
               (drag-selected-segments position))
              (rx/of click-event))))))))
@@ -747,17 +779,20 @@
         (cond
           (and mod? alt?)
           (streams/drag-stream
-           (rx/of (drag-selected-handlers handler-id :aligned))
+           (rx/of (set-drag-cursor "move-handles")
+                  (drag-selected-handlers handler-id :aligned))
            (rx/empty))
 
           (or mod? alt?)
           (streams/drag-stream
-           (rx/of (drag-selected-handlers handler-id (if mod? :mirror :independent)))
+           (rx/of (set-drag-cursor "move-handles")
+                  (drag-selected-handlers handler-id (if mod? :mirror :independent)))
            (rx/of (tools/remove-handler index prefix)))
 
           :else
           (streams/drag-stream
            (rx/of
+            (set-drag-cursor "move-move")
             (when-not selected?
               (selection/select-handler index prefix shift?))
             (drag-selected-handlers handler-id :smart))
