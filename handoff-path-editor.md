@@ -1,6 +1,6 @@
 # Handoff: Path editor investigation (event ordering / polishing)
 
-Initial investigation: 2026-07-02. Last updated: 2026-07-14. Goal: polish the path
+Initial investigation: 2026-07-02. Last updated: 2026-07-15. Goal: polish the path
 (pen tool) editor; several event-ordering problems cause unexpected results. This
 document is the source of truth for work between sessions. A copy of the original
 findings also lives in Serena memory
@@ -1054,6 +1054,15 @@ Work planned on top of the polished editor, with required groundwork:
    check still owed** (Ctrl+D node → line from predecessor; Alt+drag node/segment; the reported
    segment-move artifact after Ctrl+D) — frontend REPL unresponsive and automation can't enter
    edit mode this session.
+- [ ] **Feature 34 — keyboard-modifier interaction matrix (click / drag × node / segment /
+   handler × move / draw).** Specified 2026-07-15, **NOT implemented** — specification and
+   clarification phase only. Full requirement, all user decisions, both mode matrices,
+   shared operation semantics, existing-feature impact, and open points are in **§14**.
+   Reworks how ctrl/alt/shift modify the six pointer actions (three targets × click/drag)
+   in both edit modes. Consequences: removes feature 17 (`n` toggle), supersedes feature
+   19's alt-rejoin, replaces feature 33's node-duplication geometry (all incident
+   segments, welded to original neighbors). Per-action cursors are pending — the user
+   will define them later.
 - [x] **Refactor — make the edition stop model explicit + document deferred ordering.**
    Completed 2026-07-13. **Scope note:** `clear-edition-mode` is *already* the single
    canonical stop (bugs 1/5/7 routed the exit watcher, `finish-edition?`, and most keying
@@ -1089,6 +1098,12 @@ for features 1–3, 8, 10, and 11 is complete.
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
   group's resolved fill so it no longer goes transparent — see §5).
+- **Feature 34 — keyboard-modifier interaction matrix — SPECIFIED 2026-07-15, NOT
+  implemented.** This is the next implementation task. The complete spec (user matrices,
+  clarification decisions, semantics, existing-feature impact, open points, and
+  implementation-surface pointers) lives in **§14**; read it in full before touching
+  code. It removes feature 17, supersedes feature 19's alt-rejoin, and changes feature
+  33's node-duplication geometry.
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of
@@ -1463,3 +1478,151 @@ records the trade-off, not a plan; promote to a numbered bug/feature only once d
     a naive pass would emit a change record for *every* path in the file. Add a cheap
     "did any subpath actually close?" guard before the repack/write-back so the change set
     (and sync/history churn) is limited to the shapes that genuinely need fixing.
+
+## 14. Feature 34 spec — keyboard-modifier interaction matrix (2026-07-15, NOT implemented)
+
+Specification/clarification phase only — **no code has been written for this**. The
+matrices below are the user's requirement; every ambiguity was resolved with the user in
+a Q&A on 2026-07-15 and the decisions are inlined (marked "user-confirmed" where they
+came from that Q&A rather than the original request). **Cursors:** several cells will
+need a dedicated pointer cursor; the user will define the cursor set later — design the
+implementation so the hovered target kind + live modifiers can drive a per-cell cursor,
+but leave the actual cursor mapping open.
+
+### General rules (user-confirmed)
+
+- Three interactive object kinds — **segments, nodes, handlers** — each with **click**
+  and **click+drag** = six pointer actions, with different tables for **move** and
+  **draw** modes. Some cells are today's behavior, restated for completeness.
+- **`ctrl` = the platform modifier** (Ctrl on win/linux, Cmd on macOS — the existing
+  `ms/mouse-position-mod` / feature-10 convention). **`alt`** = Alt/Option.
+- **Modifier timing:** `ctrl`/`alt` are captured from the **pointer-down DOM event**
+  (the feature-33 capture pattern — do NOT deref the modifier behavior-subjects at
+  drag-confirm, they can be one pointer event stale) and decide WHICH action runs; the
+  action cannot change mid-drag. **`shift` is evaluated live** during the drag
+  (press/release mid-drag works) and always means the same constraint: direction
+  quantized to **15° increments** from the reference point (via
+  `position-fixed-angle`). The request's "horizontal/vertical snapping" is just the
+  0°/90° buckets of that 15° fan — nothing extra (user-confirmed).
+- **Selection scope (user-confirmed):** no-modifier and shift **drags move the whole
+  selection** (as today); **alt drags duplicate the whole selection**; `ctrl` drag
+  actions (bend, curve-config, handler mirror) and ALL click actions
+  (toggles/removals) apply **only to the grabbed/clicked element**.
+- **Feature 24 drop-merge stays (user-confirmed):** auto-merge runs after plain/shift
+  moves AND after alt-duplicate drags (dropping a copy within threshold of a node welds
+  it there); it never runs after bend/curve-config drags.
+- **"nothing" cells are literal no-ops (user-confirmed):** pointer-down with that combo
+  starts no drag and changes no selection; releasing without having dragged still
+  performs that combo's CLICK action.
+- **Draw mode + shift (user-confirmed):** shift has no per-cell meaning in draw mode; it
+  is uniformly the 15° constraint from the previous point for every draw action (which
+  is why the draw table has no shift column, and why there is no shift-click selection
+  toggle in draw mode).
+- **"PP" = pending-preserving** (draw mode): the operation leaves the line in progress
+  untouched — `:last-point`/`:prev-handler`/`:preview` and the draw loop keep running,
+  and no new line is started.
+
+### Operation semantics (shared definitions, all user-confirmed)
+
+| Term | Meaning |
+|---|---|
+| remove node | current Delete / feature 7 semantics: node removed, neighbors joined by a fitted curve (heal). |
+| remove node + segments | draw-mode ctrl+alt only: the node AND its adjacent segments are dropped — leaves an open gap, no healing. |
+| remove segment | feature-30 Delete-on-segment semantics: drop just that segment, keep both endpoint nodes (opens the path; a now-dangling end node is dropped, as today). |
+| remove handler | collapse that control point onto its node — that side of the segment becomes straight; if the segment's other control point is also degenerate, store the command as a plain `line-to`. The matching/opposite handler is untouched. |
+| flat/curved node toggle | reuse make-corner / make-curve. "Curved" = the node has ≥1 non-collapsed handle. To-flat = make-corner (collapse the node's handles); to-curve = make-curve (target-only handles 1/3 toward each neighbor — bug-13 semantics, neighbors untouched). |
+| curve-config drag (ctrl+drag on a node) | drag out the node's curve as if it were being created for the first time: symmetric, equal-length mirrored handles following the drag vector (replaces the node's existing handles). |
+| duplicate node (alt+drag) | EVERY segment incident to the node is copied; each copy's far end stays welded to the **same original neighbor node** it had, and the copies meet at the single new (dragged) node — the duplicate has the original's connectivity. **Replaces feature 33's incoming-segment-only node geometry.** |
+| duplicate segment (alt+drag) | as feature 33 today (extract-content copy of the segment, dragged as a new subpath). |
+| bend segment | feature 10 semantics: the segment curves so the grabbed point tracks the cursor; its endpoint nodes stay fixed. |
+| handler drag modes | **default** = current smart join: a joined pair stays joined (opposite mirrors the angle, keeps its own length), a corner pair moves independently. **ctrl** = force FULL mirror (opposite gets same length AND mirrored angle — also re-joins a corner pair). **alt** = force independent (opposite never touched). **ctrl+alt** = force aligned (opposite mirrors the angle but keeps its own length — forces alignment even on a corner pair). Selected-opposite suppression (feature 8) still applies. |
+| weld (draw mode) | the pending segment lands on the clicked/new node (subpaths weld into one); **pending then clears** (user-confirmed) — the next click starts a brand-new subpath. |
+| insert node on segment | the feature 16/17/29 pipeline: hover previews the node to create; click splits the segment at that point (arc-length midpoint for the near-middle case). |
+
+### MOVE mode
+
+| Target · action | no modifier | shift | ctrl | alt | ctrl+alt |
+|---|---|---|---|---|---|
+| **Segment click** | select only that segment; near the arc-length middle → insert node there, hover previews it (features 1/16/29, unchanged) | toggle the segment in/out of the selection (unchanged) | **insert node at ANY point** on the segment; hover preview follows the cursor (replaces feature 17) | select the segment (click fallback of alt+drag; no middle-insert) | **remove segment** |
+| **Segment drag** | move it (selection-wide) | move with the live 15° constraint | **bend** to the cursor (feature 10, unchanged) | **duplicate** (selection-wide) and drag the copy; +shift = 15° constraint on the copy | nothing |
+| **Node click** | select only that node | toggle the node in/out of the selection | **toggle flat/curved** | select the node (click fallback of alt+drag) | **remove node** (heal) |
+| **Node drag** | move it (selection-wide) | move with the live 15° constraint | **curve-config** (symmetric equal handles, as on first creation) | **duplicate** (selection-wide; new all-incident-segments geometry) and drag; +shift = 15° | nothing |
+| **Handler click** | select only that handler | toggle the handler in/out of the selection | **remove handler** | **remove handler** | nothing |
+| **Handler drag** | move (smart join — current default) | move with the live 15° constraint | **full mirror** (opposite = same length + mirrored angle) | **independent** (opposite untouched) | **aligned** (opposite mirrors the angle, keeps its own length) |
+
+### DRAW mode
+
+Shift = 15° constraint from the previous point, uniformly (see general rules).
+
+| Target · action | no modifier | ctrl | alt | ctrl+alt |
+|---|---|---|---|---|
+| **Canvas click** | line in progress → line-to that point; else start a line there (unchanged) | — unspecified (see open point 2) | — unspecified | — unspecified |
+| **Segment click** | insert a node at that point; line in progress → **weld** the pending segment onto it (pending clears); no line in progress → the new node becomes the start of the next segment | **toggle segment straight↔curved** (user-confirmed): line-to → curve-to with default 1/3 handles at both endpoints; curve-to → line-to (drops both control points). No node inserted. PP | **remove segment**. PP | **remove segment**. PP |
+| **Segment drag** | insert a node at the click point, **weld** the pending segment onto it (pending clears), then the drag pulls out the new node's symmetric handles — like drawing a smooth point (user-confirmed) | **bend** the segment to the drag position (feature 10 semantics). PP | — unspecified (see open point 2) | — unspecified |
+| **Node click** | line in progress → close/**weld** the pending segment onto that node — ANY node, not just the subpath start (pending clears); no line in progress → that node becomes the starting point of the next segment | **toggle flat/curved**. PP | **remove node** (heal). PP — except: if the removed node IS the pending segment's origin, also clear the pending start (the next click starts fresh, per the original request) | **remove node + adjacent segments** (gap); same pending-origin caveat |
+| **Node drag** | path in progress → finish/weld the path onto that node and shape the closing curve while dragging; at the very beginning of a path → create the start handler for the future segment (current prev-handler behavior) | **curve-config** (symmetric equal handles). PP | — unspecified | — unspecified |
+| **Handler click** | select the handler | **remove handler**. PP | **remove handler**. PP | nothing (unspecified in the request; aligned with move mode) |
+| **Handler drag** | move (smart join) | **full mirror**. PP | **independent**. PP | **aligned**. PP |
+
+### Impact on existing features
+
+- **Features 16/29** (near-middle insert at the arc-length midpoint): kept as the
+  no-modifier segment click.
+- **Feature 17** (`n` insert-anywhere toggle): **REMOVED** (user-confirmed) — delete the
+  `n` shortcut, the toolbar add-nodes toggle button, the `:add-nodes` flag
+  (`toggle-add-nodes`/`set-add-nodes`), and `esc-pressed`'s turn-it-off branch;
+  ctrl+hover/click on a segment becomes the only insert-anywhere path.
+- **Feature 19** (Alt re-joins a corner pair): **superseded** — alt is now always
+  "independent"; the re-join behavior lives in ctrl (full mirror) and ctrl+alt
+  (angle-only align).
+- **Feature 33**: Alt+drag stays the duplication gesture, but the NODE geometry changes
+  to the all-incident-segments rule (segment duplication unchanged). Ctrl+D: see open
+  point 1.
+- **Feature 10** (ctrl bend), **feature 14** (15° shift), **feature 24** (drop-merge —
+  now explicitly also after duplicate drags, never after bend/curve-config), **feature
+  30** (segment-removal semantics), **feature 7** (heal removal), and the features
+  1/3/8 selection model are reused as the corresponding cells.
+
+### Open points for the implementer (small; confirm with the user when reached)
+
+1. **Ctrl+D node duplication** — the spec covers only alt+drag; recommend aligning
+   Ctrl+D's node geometry with the new all-incident-segments rule for consistency (the
+   segment part already matches).
+2. **Unspecified draw-mode cells** (alt / ctrl+alt drags on segments and nodes,
+   modifiers on canvas clicks): recommend treating them as no-ops that still perform the
+   combo's click action on release, mirroring the move-mode "nothing" rule — confirm.
+3. **Cursor set** — the user will define per-action cursors later; implement hover-time
+   action detection (target kind + live modifiers) so a cursor can be attached per cell.
+4. **Weld onto the current subpath's own start** — the general any-node weld with
+   pending-clear should subsume today's close-on-start-node flow
+   (`close-path-drag-start`); confirm the closed loop still gets its `close-path`
+   treatment (bug 12) through the normal persistence path.
+5. **Selection side-effects of toggle/removal clicks** — unspecified whether e.g.
+   ctrl+click flat/curved also selects the node. Recommendation: leave the selection
+   unchanged, except removals prune the deleted element (and any now-invalid indices)
+   from the selection.
+
+### Implementation surface (pointers, not a plan)
+
+- `ui/workspace/shapes/path/editor.cljs` pointer-down handlers must thread `ctrl`/`alt`
+  (and keep `shift`) from the DOM event into the drp events — the feature-33 capture
+  pattern; hover handlers need the same modifier awareness for previews and future
+  cursors (ctrl-hover on a segment must show the insert preview anywhere).
+- `data/workspace/path/edition.cljs` `start-node-drag` / `start-segment-drag` are the
+  existing at-drag-confirm dispatchers to extend; a matching handler-drag dispatcher
+  (around `start-move-handler` / `modify-selected-handlers`) is needed for the four
+  handler-drag modes; `move-handler-modifiers` grows explicit
+  mirror/independent/aligned modes (it already has the `rejoin?` arity from feature 19).
+- Click-vs-drag discrimination stays `streams/drag-stream` (5px/zoom); the click branch
+  of each dispatcher gets the per-combo click actions.
+- Tool-op reuse: `tools/process-path-tool` (make-corner / make-curve / remove-node /
+  separate), `helpers/insertion-point` + `create-node-at-position` (insert),
+  feature-30 `delete-selected` segment branch (remove segment), feature-33
+  `splice-duplicated` (duplication; node sub-content builder needs the new geometry),
+  the feature-10 bend pipeline (`bend-selected-segment`).
+- Draw-mode weld / segment-insert interacts with the draw loop (`drawing.cljs`
+  `start-edition`, `close-path-drag-start`): the pending-clear rule maps onto the
+  existing cancel-pending/close flows; ctrl/alt draw-mode ops must NOT emit `add-node`
+  or otherwise feed the pending-segment state (PP cells).
+- Removing feature 17 touches `tools.cljs`, `shortcuts.cljs`, `path_actions.cljs`, the
+  `esc-pressed` first branch, and the `workspace.path.actions.add-nodes` i18n key.
