@@ -448,6 +448,50 @@
     ;; deleting a node removes it (fewer than the original 4 nodes)
     (t/is (< (nodes (run {:nodes #{1} :segments #{} :handlers #{}})) 4))))
 
+(t/deftest duplicate-selection-content-copies-nodes-and-segments
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :line-to :params {:x 10 :y 0}}
+                  {:command :line-to :params {:x 20 :y 0}}])]
+    ;; a lone node copies its incoming segment: attach at the predecessor (10,0)
+    ;; and one new node — the shifted endpoint (30,10) — is the only selectable
+    (let [{:keys [sub selected]}
+          (path.helpers/duplicate-selection-content
+           content {:nodes #{2} :segments #{}} (gpt/point 10 10))]
+      (t/is (= [[:move-to {:x 10 :y 0}]
+                [:line-to {:x 30 :y 10}]]
+               (mapv (juxt :command :params) sub)))
+      ;; only the new endpoint (index 1) is selected, not the attach point
+      (t/is (= #{1} selected)))
+    ;; a selected segment is copied as a fragment shifted by the offset, both
+    ;; endpoints selectable
+    (let [{:keys [sub selected]}
+          (path.helpers/duplicate-selection-content
+           content {:nodes #{} :segments #{1}} (gpt/point 10 10))]
+      (t/is (= [[:move-to {:x 10 :y 10}]
+                [:line-to {:x 20 :y 10}]]
+               (mapv (juxt :command :params) sub)))
+      (t/is (= #{0 1} selected)))))
+
+(t/deftest splice-duplicated-appends-copies-and-selects-only-new-nodes
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 0}}
+                   {:command :line-to :params {:x 20 :y 0}}])
+        result   (path.helpers/duplicate-selection-content
+                  content {:nodes #{2} :segments #{}} (gpt/point 10 10))
+        state    (selectable-path-state id content {:nodes #{2} :segments #{} :handlers #{}})
+        state'   (ptk/update (path.edition/splice-duplicated result) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; the copy is appended as a new subpath (3 original + 2 spliced commands)
+    (t/is (= 5 (count content')))
+    ;; only the new endpoint (absolute index 4) is selected; the attach point
+    ;; (index 3, coincident with the original node) is not, so a drag never
+    ;; moves the original along with the copy
+    (t/is (= #{4}
+             (get-in state' [:workspace-local :edit-path id :selection :nodes])))))
+
 (defn- run-handle-drawing-end
   "Drives the handle-drawing continuation with an ::end-edition carrying
   the given :restart? flag and calls back with the drawing-end emissions."

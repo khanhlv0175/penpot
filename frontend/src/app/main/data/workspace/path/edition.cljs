@@ -268,8 +268,66 @@
 
 (declare drag-selected-points)
 
+(def duplicate-offset
+  "Displacement applied to a duplicated node/segment so the copy does not land
+  exactly on the original (the position-based move pipeline would otherwise drag
+  both together)."
+  (gpt/point 10 10))
+
+(defn splice-duplicated
+  "Splices duplicate content (`{:sub <commands> :selected <relative indices>}`,
+  as produced by `helpers/duplicate-selection-content`) into the edited path as
+  new subpaths and selects the new nodes."
+  [{:keys [sub selected]}]
+  (ptk/reify ::splice-duplicated
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id (st/get-path-id state)]
+        (if (and (some? id) (seq sub))
+          (let [content     (st/get-path state :content)
+                base        (count content)
+                new-content (path/splice-content content sub)
+                pasted      (into #{} (map #(+ base %)) selected)]
+            (-> state
+                (st/set-content new-content)
+                (update-in (st/get-path-location state) path/update-geometry)
+                (assoc-in [:workspace-local :edit-path id :selection]
+                          (assoc helpers/empty-selection :nodes pasted))))
+          state)))))
+
+(defn- duplicate-and-drag
+  "Alt+drag: duplicates the current node/segment selection and drags the copy
+  from `start-position`. Dragging the duplicated endpoint nodes translates a
+  copied segment; a duplicated node tracks the pointer while its line stays
+  attached to the original's predecessor."
+  [start-position]
+  (ptk/reify ::duplicate-and-drag
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (dm/get-in state [:workspace-local :edit-path id :selection])
+            result    (helpers/duplicate-selection-content content selection duplicate-offset)]
+        (if (seq (:sub result))
+          (rx/of (splice-duplicated result)
+                 (drag-selected-points start-position))
+          (rx/of (drag-selected-points start-position)))))))
+
+(defn- start-node-drag
+  "Dispatches a node pointer-drag: with Alt held it duplicates the selection
+  and drags the copy; otherwise it drags the selection. `alt?` is captured from
+  the pointer-down DOM event (reading the `ms/mouse-position-alt` behavior
+  subject here lags one pointer event behind, making Alt detection flaky)."
+  [start-position alt?]
+  (ptk/reify ::start-node-drag
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (if alt?
+        (rx/of (duplicate-and-drag start-position))
+        (rx/of (drag-selected-points start-position))))))
+
 (defn start-move-path-point
-  [index shift?]
+  [index shift? alt?]
   (ptk/reify ::start-move-path-point
     ptk/WatchEvent
     (watch [_ state _]
@@ -279,7 +337,7 @@
         (streams/drag-stream
          (rx/of
           (when-not selected? (selection/select-node index shift?))
-          (drag-selected-points @ms/mouse-position))
+          (start-node-drag @ms/mouse-position alt?))
          (rx/of (selection/select-node index shift?)))))))
 
 (defn drag-selected-points
@@ -315,7 +373,7 @@
 (declare create-node-at-position)
 
 (defn start-move-path-segment
-  [index shift?]
+  [index shift? alt?]
   (ptk/reify ::start-move-path-segment
     ptk/WatchEvent
     (watch [_ state _]
@@ -343,7 +401,7 @@
         (streams/drag-stream
          (rx/of
           (when-not selected? (selection/select-segment index shift?))
-          (start-segment-drag index @ms/mouse-position))
+          (start-segment-drag index @ms/mouse-position alt?))
          (rx/of click-event))))))
 
 (defn- segment-entry
@@ -359,11 +417,13 @@
     [from to from to]))
 
 (defn- start-segment-drag
-  "Dispatches a segment pointer-drag: with the platform modifier held, the
-  grabbed segment bends through the pointer while its endpoint nodes stay
-  fixed; otherwise the selected segments translate. Closing (`close-path`)
-  segments carry no handles and always translate."
-  [index start-position]
+  "Dispatches a segment pointer-drag: with Alt held it duplicates the selection
+  and drags the copy; with the platform modifier held, the grabbed segment
+  bends through the pointer while its endpoint nodes stay fixed; otherwise the
+  selected segments translate. Closing (`close-path`) segments carry no handles
+  and always translate. `alt?` is captured from the pointer-down DOM event (the
+  `ms/mouse-position-alt` behavior subject lags one pointer event behind here)."
+  [index start-position alt?]
   (ptk/reify ::start-segment-drag
     ptk/WatchEvent
     (watch [_ state _]
@@ -372,8 +432,14 @@
             bend?   (and (deref ms/mouse-position-mod)
                          (some? entry)
                          (not= :close-path (:command (:segment entry))))]
-        (if bend?
+        (cond
+          alt?
+          (rx/of (duplicate-and-drag start-position))
+
+          bend?
           (rx/of (bend-selected-segment index start-position))
+
+          :else
           (rx/of (drag-selected-segments start-position)))))))
 
 (defn drag-selected-segments

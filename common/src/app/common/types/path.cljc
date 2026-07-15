@@ -273,6 +273,75 @@
   [content sub-content]
   (impl/path-data (into (vec content) (vec sub-content))))
 
+(defn- move-segment-end
+  "Shifts a segment command's endpoint (its anchor and, for a curve, the handle
+  arriving at that anchor) by `delta`, leaving the departing handle in place so
+  the segment still leaves its start point the same way."
+  [segment {dx :x dy :y}]
+  (cond-> (-> segment
+              (update-in [:params :x] + dx)
+              (update-in [:params :y] + dy))
+    (= :curve-to (:command segment))
+    (-> (update-in [:params :c2x] + dx)
+        (update-in [:params :c2y] + dy))))
+
+(defn- segment->end
+  "The command that arrives at a segment entry's `:to` node, as a concrete
+  drawing command: a `close-path` becomes the equivalent line-to to its
+  endpoint so it carries usable coordinates."
+  [{:keys [to segment]}]
+  (if (= :close-path (:command segment))
+    {:command :line-to :params {:x (:x to) :y (:y to)}}
+    segment))
+
+(defn- reverse-segment
+  "Reverses a segment command that runs from `from` to its own endpoint, so the
+  result runs from the old endpoint back to `from` (swapping a curve's handles
+  so the shape is preserved)."
+  [segment {fx :x fy :y}]
+  (if (= :curve-to (:command segment))
+    (let [{:keys [c1x c1y c2x c2y]} (:params segment)]
+      {:command :curve-to
+       :params {:x fx :y fy :c1x c2x :c1y c2y :c2x c1x :c2y c1y}})
+    {:command :line-to :params {:x fx :y fy}}))
+
+(defn duplicate-node-content
+  "Sub-content (a single new subpath) that duplicates the node at the given
+  content command `index`. A copy of the node's incoming segment as a new
+  subpath that starts attached to the node's *predecessor* (so the duplicate
+  keeps its line coming from the same place) and ends in one new node shifted by
+  `node-offset` (its only genuinely new point). A subpath start has no incoming
+  segment, so its outgoing segment is copied reversed instead — the duplicate
+  then attaches at the *successor* and its new node sits on the start node's
+  side. A lone point (a subpath with only a move-to) is copied as an offset
+  point. Returns nil only when the index resolves to nothing."
+  [content index node-offset]
+  (let [content  (impl/path-data content)
+        entries  (segment-entries content)
+        incoming (d/seek #(= index (:to-index %)) entries)
+        outgoing (d/seek #(= index (:from-index %)) entries)]
+    (cond
+      (some? incoming)
+      (let [{:keys [from]} incoming
+            start {:command :move-to :params {:x (:x from) :y (:y from)}}
+            end   (cond-> (segment->end incoming)
+                    (some? node-offset) (move-segment-end node-offset))]
+        [start end])
+
+      (some? outgoing)
+      (let [{:keys [from to segment]} outgoing
+            start {:command :move-to :params {:x (:x to) :y (:y to)}}
+            end   (cond-> (reverse-segment segment from)
+                    (some? node-offset) (move-segment-end node-offset))]
+        [start end])
+
+      :else
+      (when-let [{:keys [x y]} (:params (nth content index nil))]
+        [{:command :move-to
+          :params (if (some? node-offset)
+                    {:x (+ x (:x node-offset)) :y (+ y (:y node-offset))}
+                    {:x x :y y})}]))))
+
 (defn calc-selrect
   "Calculate selrect from a content. The content can be in a PathData
   instance or plain vector of segments."

@@ -121,6 +121,11 @@
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/paste-nodes))}
 
+   :duplicate       {:tooltip (ds/meta "D")
+                     :command (ds/c-mod "d")
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/duplicate-selected))}
+
    :flip-horizontal {:tooltip (ds/shift "H")
                      :command "shift+h"
                      :subsections [:path-editor]

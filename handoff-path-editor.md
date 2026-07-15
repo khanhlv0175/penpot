@@ -1006,13 +1006,54 @@ Work planned on top of the polished editor, with required groundwork:
    `:ok`, `clj-kondo` 0/0, `cljfmt` clean. (Trivial initial-value flip; live by-hand check
    owed with the other path-edition behaviours — automation can't enter edit mode this
    session.)
-- [ ] **Feature 33 — duplicate nodes & segments (Ctrl+D, Alt+drag).** `Ctrl+D` duplicates
-   the current selection: a **segment** duplicates exactly like copy/paste of a segment
-   (reuse feature 2's `extract-content`/`splice-content` + the paste offset); a **node**
-   duplicates into a new node carrying the same segment properties (handles/curve) as the
-   duplicated one. **Alt+drag** on a node or segment also duplicates (drop a copy, drag the
-   duplicate away) — branch the drag pipeline in `edition.cljs` on the Alt modifier at
-   drag-confirm to splice a duplicate before moving.
+- [x] **Feature 33 — duplicate nodes & segments (Ctrl+D, Alt+drag).** Completed 2026-07-14.
+   `Ctrl+D` (`clipboard/duplicate-selected`, shortcut `:duplicate` = `(ds/c-mod "d")`) and
+   **Alt+drag** both duplicate the current node/segment selection.
+   **Node-duplication geometry (user decision + correction this session):** duplicating a node
+   copies its **incoming segment** into a new subpath that starts **attached to the node's
+   predecessor** (so the copy's line still comes from the same place — the original complaint
+   was that it came from the node itself) and ends in **one** new node shifted by the offset (the
+   only genuinely new point). Common `path/duplicate-node-content [content index node-offset]`:
+   finds the node's incoming `segment-entry` (`from` = predecessor, `segment` = incoming
+   command), returns `[move-to(from) (move-segment-end segment node-offset)]` where
+   `move-segment-end` shifts only the endpoint anchor and its **arriving** handle (`:c2`),
+   leaving the departing handle (`:c1`, near the predecessor) in place. Returns nil for a subpath
+   start (no incoming segment) — duplicating a subpath's first node is a no-op (acceptable;
+   end/interior nodes all have an incoming segment).
+   **Selection → sub-content** (frontend `helpers/duplicate-selection-content
+   [content selection offset]` → `{:sub <commands> :selected #{rel-indices}}`): selected segments
+   (and segments between two selected nodes) copy via `path/extract-content` (preserves curves),
+   shifted by `offset`; every **remaining** lone node (not already covered by a duplicated
+   segment, via `fragment-covered-nodes`) is copied. `:selected` holds every genuinely **new**
+   node — all fragment nodes plus each copied node's endpoint — but **never a copied node's
+   attach point**, which stays coincident with the original. This is load-bearing: the move
+   pipeline is position-based, so selecting the coincident attach point would drag the original
+   node along with the copy (the bug that made Alt+drag/node-Ctrl+D appear "not working").
+   **Flows:** `edition/splice-duplicated {:sub :selected}` appends the sub-content and selects
+   `base + selected`. Both `Ctrl+D` and Alt+drag use `edition/duplicate-offset = (10,10)` so the
+   copy never lands exactly on the original (position-based collision). `Ctrl+D`
+   (`duplicate-selected`) then `change-edit-mode :move` (only when `:edition` present).
+   **Alt+drag** — `edition/start-node-drag` (new dispatcher in `start-move-path-point`) and
+   `start-segment-drag` decide on Alt at drag-confirm; when held they emit
+   `duplicate-and-drag` → `splice-duplicated` → `drag-selected-points`. **Reliability fix:** the
+   Alt flag is now **captured from the pointer-down DOM event** (`kbd/alt? event`, threaded as a
+   new `alt?` arg through `start-move-path-point`/`start-move-path-segment`) instead of deref-ing
+   `@ms/mouse-position-alt` at drag-confirm — that behavior subject is fed from the same shared
+   `pointer` stream but subscribed *after* `ms/mouse-position`, so the depth-first re-entrant
+   cascade into `start-node-drag` reads it one pointer event stale (Alt worked only when it had
+   been held during hover; flaky on fast drags / late Alt — the reported "sometimes doesn't
+   work"). Dragging the pasted
+   endpoint(s) translates a copied segment; a copied node's new endpoint tracks the cursor (delta
+   from its own start; one-frame ~10px jump from the offset start) while its line stays attached
+   to the predecessor. Bend (platform-mod) and translate branches unchanged.
+   **Verified:** common `path-duplicate-node-content` (predecessor-attach line/curve, verbatim
+   no-offset, subpath-start nil — 1 test/4 assertions) and frontend
+   `duplicate-selection-content-copies-nodes-and-segments` +
+   `splice-duplicated-appends-copies-and-selects-only-new-nodes` (focused suite **49 tests / 131
+   assertions, 0 failures**). Compiler `:ok`, `clj-kondo` 0/0, `cljfmt` clean. **Live by-hand
+   check still owed** (Ctrl+D node → line from predecessor; Alt+drag node/segment; the reported
+   segment-move artifact after Ctrl+D) — frontend REPL unresponsive and automation can't enter
+   edit mode this session.
 - [x] **Refactor — make the edition stop model explicit + document deferred ordering.**
    Completed 2026-07-13. **Scope note:** `clear-edition-mode` is *already* the single
    canonical stop (bugs 1/5/7 routed the exit watcher, `finish-edition?`, and most keying
@@ -1042,9 +1083,9 @@ for features 1–3, 8, 10, and 11 is complete.
   path-edition options panel incl. read-only measures + live styling preview; arc-length
   half-point insertion; segment flip/delete/merge; temporary 80% fill opacity — see §6;
   several path-edition live behaviours still owe a by-hand pass given automation can't enter
-  edit mode this session). **Feature 32 done** (2026-07-14, snap-to-node on by default for
-  both creation and edition — see §6). **Not yet started:** feature 33 (Ctrl+D / Alt+drag
-  duplicate). See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
+  edit mode this session). **Features 32 and 33 done** (2026-07-14: snap-to-node on by default
+  for both creation and edition; Ctrl+D / Alt+drag duplicate of nodes/segments — see §6). All
+  planned features (1–33, minus dropped 4/5) are now done. See §5/§6 for each. **Bug 12 reopened is fixed** (2026-07-14,
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
   group's resolved fill so it no longer goes transparent — see §5).

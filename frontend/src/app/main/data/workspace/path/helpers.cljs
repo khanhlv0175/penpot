@@ -302,6 +302,52 @@
                   (map first))
             (d/enumerate new-content)))))
 
+(defn- fragment-covered-nodes
+  "Node indices already duplicated as part of a segment fragment
+  (`path/extract-content`): the endpoints of every selected segment and of
+  every segment between two selected nodes."
+  [content {:keys [nodes segments]}]
+  (let [nodes    (or nodes #{})
+        segments (or segments #{})]
+    (into #{}
+          (comp (filter (fn [{:keys [index from-index to-index]}]
+                          (or (contains? segments index)
+                              (and (contains? nodes from-index)
+                                   (contains? nodes to-index)))))
+                (mapcat (juxt :from-index :to-index)))
+          (segment-entries content))))
+
+(defn duplicate-selection-content
+  "Duplicates the current node/segment selection. Returns
+  `{:content <sub-content> :selected #{relative-node-indices}}` ready to splice
+  as new subpaths. Selected segments (and segments between two selected nodes)
+  are copied as fragments shifted by `offset`; every remaining lone selected
+  node is copied as a new subpath that keeps its incoming segment and ends in a
+  single new node shifted by `offset`. `:selected` holds every genuinely new
+  node (all fragment nodes plus each copied node's endpoint) but never a copied
+  segment's attach point, which stays coincident with the original — selecting
+  it would drag the original too (the move pipeline is position-based)."
+  [content selection offset]
+  (let [fragment (path/extract-content content selection)
+        fragment (cond-> fragment
+                   (and (seq fragment) (some? offset))
+                   (path/move-content offset))
+        fragment (vec fragment)
+        covered  (fragment-covered-nodes content selection)
+        free     (sort (remove covered (get selection :nodes #{})))]
+    (reduce (fn [{:keys [sub selected]} node-index]
+              (if-let [ext (path/duplicate-node-content content node-index offset)]
+                (let [start (count sub)]
+                  ;; ext = [move-to(attach) segment(new node)]; only the last
+                  ;; command (the new node) is selectable, the attach point is
+                  ;; not. A lone point is a single move-to that is itself the
+                  ;; new node.
+                  {:sub      (into sub ext)
+                   :selected (conj selected (+ start (dec (count ext))))})
+                {:sub sub :selected selected}))
+            {:sub fragment :selected (set (node-indices fragment))}
+            free)))
+
 (defn remap-selection
   "Adjust a grouped selection map after the content changed. With the same
   command layout (equal command count) node and segment indices remain valid

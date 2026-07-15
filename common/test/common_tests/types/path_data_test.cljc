@@ -1841,6 +1841,40 @@
               {:x 5.0 :y 5.0} {:x 10.0 :y 10.0}]
              (mapv :params result)))))
 
+(t/deftest path-duplicate-node-content
+  ;; duplicating a node copies its incoming segment into a new subpath that
+  ;; starts attached to the node's predecessor (so the line keeps coming from
+  ;; the same place) and ends in one new node shifted by the offset. A subpath
+  ;; start (no incoming segment) yields nil.
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 100.0 :y 0.0}}
+                  {:command :curve-to :params {:x 200.0 :y 100.0 :c1x 100.0 :c1y 50.0 :c2x 150.0 :c2y 100.0}}])
+        off     (gpt/point 10 10)]
+    ;; line node: attach at predecessor (0,0); new node (100,0) shifted to (110,10)
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:line-to {:x 110.0 :y 10.0}]]
+             (mapv (juxt :command :params) (path/duplicate-node-content content 1 off))))
+    ;; curve node: attach at predecessor (100,0); anchor and arriving handle
+    ;; (c2) shift, departing handle (c1) stays
+    (t/is (= [[:move-to {:x 100.0 :y 0.0}]
+              [:curve-to {:c1x 100.0 :c1y 50.0 :c2x 160.0 :c2y 110.0 :x 210.0 :y 110.0}]]
+             (mapv (juxt :command :params) (path/duplicate-node-content content 2 off))))
+    ;; without an offset the incoming segment is copied verbatim
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:line-to {:x 100.0 :y 0.0}]]
+             (mapv (juxt :command :params) (path/duplicate-node-content content 1 nil))))
+    ;; subpath start has no incoming segment: its outgoing segment is copied
+    ;; reversed — attach at the successor (100,0), new node on the start side
+    ;; (0,0) shifted to (10,10)
+    (t/is (= [[:move-to {:x 100.0 :y 0.0}]
+              [:line-to {:x 10.0 :y 10.0}]]
+             (mapv (juxt :command :params) (path/duplicate-node-content content 0 off))))
+    ;; a lone point (subpath with only a move-to) is copied as an offset point
+    (let [lone (path/content [{:command :move-to :params {:x 5.0 :y 5.0}}])]
+      (t/is (= [[:move-to {:x 15.0 :y 15.0}]]
+               (mapv (juxt :command :params) (path/duplicate-node-content lone 0 off)))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; BOOL OPERATIONS — INTERSECTION / DIFFERENCE / EXCLUSION
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

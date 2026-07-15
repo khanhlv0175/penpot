@@ -91,7 +91,7 @@
 
                   is-move
                   ;; If we're dragging a selected item we don't change the selection
-                  (st/emit! (drp/start-move-path-point index is-shift))
+                  (st/emit! (drp/start-move-path-point index is-shift (kbd/alt? event)))
 
                   (and is-draw is-start-path)
                   (st/emit! (drp/start-path-from-point position))
@@ -240,7 +240,7 @@
            (when (and ^boolean is-interactive (dom/left-mouse? event))
              (dom/stop-propagation event)
              (dom/prevent-default event)
-             (st/emit! (drp/start-move-path-segment index (kbd/shift? event))))))]
+             (st/emit! (drp/start-move-path-segment index (kbd/shift? event) (kbd/alt? event))))))]
     [:g.path-segment {:pointer-events (if ^boolean is-interactive "visible" "none")}
      (when ^boolean is-active
        [:path {:d (.toString content)

@@ -32,6 +32,7 @@
 ;; Clipboard
 (dm/export clipboard/copy-selected-nodes)
 (dm/export clipboard/paste-nodes)
+(dm/export clipboard/duplicate-selected)
 
 ;; Selection
 (dm/export selection/handle-area-selection)
