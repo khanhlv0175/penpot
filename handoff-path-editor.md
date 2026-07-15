@@ -1105,6 +1105,23 @@ for features 1–3, 8, 10, and 11 is complete.
   feature 33's node-duplication geometry (Ctrl+D included). **The per-cell cursor
   mapping is now also implemented (2026-07-15, user-provided spec — see §15).** Still
   open: the **live by-hand pass** over the whole matrix + cursors.
+- **New batch requested 2026-07-15 — NOT yet implemented (features 35–40, see §16):**
+  mid-segment node creation must beat pixel-grid snap at high zoom (35); `Ctrl+A`
+  select-all-nodes (36); `Shift+Delete` = remove node + adjacent segments / open path
+  (37, reuses `remove-node-with-segments`); selected nodes recoloured to the segment pink
+  (38); paste path nodes **outside** the editor → new path shape, and into another open
+  path editor (39); path-editor top-bar refactor — fixed width, draw/move separator, drop
+  add/remove-node buttons, hide (not disable) unavailable icons (40). Full analysis and
+  file/function pointers in §16.
+- **Cursor sizing fix (2026-07-15):** the `draw-add`/`draw-node`/`draw-remove` badge
+  cursors rendered the pen smaller than `draw` (their SVGs pack pen+badge into the
+  16-unit viewBox at `scale(0.762)` vs `draw`'s `scale(0.941)`). Fixed by rendering the
+  three badge cursors larger (25×25px) instead of shrinking the artwork:
+  `ui/cursors.clj` `encode-svg-cursor`/`cursor-ref` gained a `width` param (default 20),
+  and `ui/cursors.cljs` sets `draw-add/node/remove` to `(cursor-ref … 25 25)`. Pen now
+  matches `draw` physically; badge keeps its clean corner position; SVGs unchanged.
+  Cursors inline at macro-expansion (`io/resource slurp`), so SVG edits need a forced
+  recompile of `ui/cursors.clj` + a hard refresh (css `init-styles` runs once at boot).
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of
@@ -1789,3 +1806,172 @@ page-evaluated calls; `set-drag-cursor` flipped viewport+node+handler to
 exception. **Owed:** the by-hand pass with real pointer gestures (hover transitions,
 drag cursors during actual drags, draw-mode cells — synthetic key/pointer events can't
 drive hover, and entering edit mode needed store events).
+
+## 16. New feature batch (requested 2026-07-15) — NOT yet implemented
+
+Six new requests. This section is analysis + pointers for a fresh session; none are
+coded yet. Continue the feature numbering (34 was the last). Cross-references use the
+existing §5/§6 entries. As always: work in the drawing copy, persist once on exit, and
+run the frontend suite inside the devenv container (`mem:frontend/testing`).
+
+### Feature 35 — mid-segment node creation must beat pixel-grid snap at high zoom
+
+**Requirement:** when zoomed in a lot, pixel-grid snapping (`:snap-pixel-grid`) currently
+takes precedence over "snap to the line segment", so an inserted node drifts off the
+line. Node **creation on a segment** should win: the new node lands exactly on the
+segment, not on the pixel grid.
+
+**Where it lives:**
+- `data/workspace/path/streams.cljs`: `to-pixel-snap` (quantises to 0.5px above
+  `half-pixel-snap-zoom` = 3, i.e. zoom > 300%; feature 25) — the shared snap step for
+  `drag-stream`'s start point and `move-points-stream`.
+- `data/workspace/path/helpers.cljs`: `insertion-point` (nearest segment arc-length
+  middle within `segment-insert-threshold` = 12/zoom, or closest point when
+  `anywhere?`), `segment-mid-point`, `segment-base-curve`.
+- `data/workspace/path/edition.cljs` ~485–525: segment pointer-down cond — the `:else`
+  and `mod?` branches call `(helpers/insertion-point content position threshold …)` with
+  `position = @ms/mouse-position` (raw), then `create-node-at-position (meta insert-point)`
+  → `split-segments` (~917) which splits at the exact arc-length `:t` on the curve.
+- `data/workspace/path/drawing.cljs` ~595–605: the draw-mode segment insert path.
+- `ui/workspace/shapes/path/editor.cljs`: the dashed insert preview (`use-stream` over
+  `insertion-point`, keyed on `ms/mouse-position`/`ms/keyboard-mod`).
+
+**Analysis / hypothesis:** the split itself is parametric (on-curve), so the *created*
+node should already be on the line — the drift is most likely in what position feeds the
+decision/preview, or a follow-up snap. Repro at zoom > 300% and pin the exact spot:
+either (a) the hit/threshold or preview position is being read through `to-pixel-snap`
+and rounding pushes it off the segment (so the preview and the split `t` disagree), or
+(b) after insertion the node picks up a pixel-snapped position. Fix = the insertion
+position must bypass `to-pixel-snap` (segment/on-curve position wins); pixel snapping
+should only govern free node/handle placement, not mid-segment insertion. Keep feature
+25/29 (half-pixel node moves, arc-length midpoint) intact. Pure enough to unit-test the
+"inserted node lies on the segment at high zoom" property; also needs a live check
+because the streams read global `ms/mouse-position` (§7 limitation).
+
+### Feature 36 — `Ctrl+A` selects all nodes in the path editor
+
+**Requirement:** add `Ctrl/Cmd+A` in path edition that selects every node.
+
+**Where:** new event in `data/workspace/path/selection.cljs` (alongside `select-node`
+~80 and `deselect-all` ~141) — e.g. `select-all-nodes` that sets
+`[:workspace-local :edit-path id :selection]` to
+`(assoc helpers/empty-selection :nodes (into #{} (helpers/node-indices content)))`
+(`helpers/node-indices` already exists; content from `st/get-path`). Export from
+`data/workspace/path.cljs` and bind in `data/workspace/path/shortcuts.cljs`:
+`:select-all {:command (ds/c-mod "a") :subsections [:path-editor] :fn #(st/emit! (drp/select-all-nodes))}`.
+
+**Gotcha:** workspace-global `Ctrl+A` = "select all shapes"
+(`data/workspace/shortcuts` / selection). The path-editor keymap must take precedence
+while editing — verify the path shortcuts are the active keymap during edition and that
+this binding shadows the global one (check how the other path shortcuts, e.g. `copy`,
+already override their global namesakes; same mechanism).
+
+### Feature 37 — `Shift+Delete` deletes the node **and** its adjacent segments (opens the path)
+
+**Requirement:** a second delete shortcut that removes the node together with its
+adjacent segments, leaving an open gap (no heal), vs the plain Delete which heals.
+
+**Where:** the operation already exists — `tools/remove-node-with-segments` (feature 34,
+§14 "remove node + segments"; incident entries → `remove-segments`), exported from
+`path.cljs`. Just add the binding in `shortcuts.cljs`:
+`:delete-node-and-segments {:command ["shift+del" "shift+backspace"] :subsections [:path-editor] :fn #(st/emit! (drp/remove-node-with-segments))}`.
+Plain `:delete-node` stays `["del" "backspace"] → delete-selected` (heal / feature-30
+segment-open semantics). Confirm mousetrap resolves `shift+del` distinctly from `del`
+(it does; shift is an explicit modifier). Behaviour parity with the draw-mode `ctrl+alt`
+node cell in §14.
+
+### Feature 38 — selected nodes use the segment pink, not the green accent
+
+**Requirement:** selected nodes should be the same pink as the line/segment selection
+instead of green.
+
+**Where:** `ui/workspace/shapes/path/editor.cljs`. `accent-color`
+(`"var(--color-accent-tertiary)"`, the green) is the selected fill for nodes
+(`path-point*` ~148 `:fill (cond is-selected accent-color …)`) and handlers (~235);
+`selected-segment-color "#F49EF7"` (pink) is the selected segment stroke (~292). Change
+the node selected-fill branch to the pink. Cleanest: rename `selected-segment-color` →
+a shared `selected-color` (or add `selected-node-color` = same pink) and use it for the
+`is-selected` node fill; decide whether selected **handlers** should match too (request
+says nodes — keep handlers as-is unless it looks inconsistent). Trivial + purely visual;
+verify live that hover (still `accent-color`) and selected (pink) are distinguishable.
+
+### Feature 39 — paste path nodes **outside** the editor (new shape) and into **another** path editor
+
+**Requirement:** copied nodes/segments (feature 2) can currently only be pasted inside
+the same path edition. Wanted: (a) pasting **outside** any path editor creates a **new
+path shape** whose content is the clipboard path fragment; (b) pasting inside a
+**different** path editor splices the nodes into that path.
+
+**Current state:**
+- `data/workspace/path/clipboard.cljs`: `copy-selected-nodes` writes
+  `{:type :copied-path-content :content <PathData>}` (transit `:json-verbose`) to the
+  system clipboard; `paste-nodes` reads it and `paste-content` splices into
+  `st/get-path-id` (the *currently* edited path). **Sub-requirement (b) likely already
+  works** — `paste-content` targets whatever path is in edition — so mostly needs
+  verification, not new code (the `:paste` path shortcut is only bound while editing).
+- The generic workspace paste is `data/workspace/clipboard.cljs`
+  `paste-from-clipboard`/`paste-from-event` → `create-paste-from-blob` (~266). Its
+  `application/transit+json` branch decodes the map and `case`s on `:type`:
+  `:copied-props` / `:copied-shapes`, else `(rx/empty)` — so a `:copied-path-content`
+  payload is silently dropped today (that's why outside-editor paste is a no-op).
+
+**Approach for (a):** add a `:copied-path-content` case to `create-paste-from-blob`'s
+`case` that builds and inserts a new path shape from the fragment. Reuse
+`cts/setup-shape {:type :path :content <PathData> …}` (picks up `minimal-path-attrs` —
+centre stroke default, feature 18), derive `:selrect`/`:points` via
+`path/update-geometry`, place it (centre of viewport or the pointer, mirroring how
+`paste-shapes` positions), and commit through the normal add-shape/undo flow
+(`dwsh/add-shapes` or the create pipeline used by `paste-shapes`). The fragment is
+absolute/world-coord `PathData` (WASM content convention). Keep the new shape selected.
+Consider factoring the shape-build into `path/clipboard.cljs` (e.g.
+`paste-nodes-as-shape`) and just dispatching to it from the generic `case`, so the path
+logic stays in the path namespace. Watch the transit round-trip: path copy uses
+`{:type :json-verbose}` and PathData has transit handlers (feature 2) — the generic
+`t/decode-str` must reconstruct the `PathData` (verify, and that the `map?` filter +
+`:type` dispatch survive before `paste-data-valid?`, which only runs inside
+`paste-transit-shapes`).
+
+**Decision needed from the user later:** placement (viewport centre vs pointer vs
++10/+10 offset) and whether an outside paste should also enter path edition on the new
+shape or just drop it selected. Default suggestion: drop it selected, no auto-edit.
+
+### Feature 40 — path-editor top-bar refactor
+
+**Requirement:** (1) fixed size for the bar; (2) a vertical separator between the
+draw/move icons and the rest; (3) remove the **add-node** and **remove-node** buttons;
+(4) the remaining node-op icons should be **removed when unavailable** rather than shown
+disabled (draw/move/snap stay always visible).
+
+**Where:** `ui/workspace/viewport/path_actions.cljs` (`path-actions*`, `check-enabled`)
+and its style module `ui/workspace/viewport/path_actions.scss`.
+- **(3)** delete the "Add Node"/"Remove node" `[:button]`s (the `:sub-actions-group` at
+  ~171–184) and drop `:add-node`/`:remove-node` from `check-enabled` (~64–65) and the
+  `on-add-node`/`on-remove-node` handlers. Note deletion is still available via the
+  Delete key (`shortcuts` `:delete-node` → `delete-selected`) and insertion via clicking
+  a segment (features 16/29) — only the toolbar buttons go. (The `:add-node` shortcut
+  `shift++` can stay or go; confirm with the user. The feature-17 add-nodes *toggle* was
+  already removed in §14.)
+- **(4)** replace each remaining node-op button's `:disabled (not (:x enabled-buttons))`
+  with conditional rendering: `(when (:x enabled-buttons) [:button …])` for merge / join /
+  separate / make-corner / make-curve. Keep draw, move and snap always rendered (they are
+  mode/toggle controls, not selection-gated). Empty `:sub-actions-group`s should
+  contribute nothing (render `nil`), so a group with no enabled buttons collapses.
+- **(1)+(2)** in `path_actions.scss`: give `.sub-actions` a fixed width (so it doesn't
+  reflow as buttons appear/disappear — important now that buttons are conditionally
+  rendered) and add a vertical divider between the draw/move group and the following
+  groups (a `border-left`/`::before` on the first group after draw/move, or a dedicated
+  separator element, matching the existing design-system separators — see
+  `ui-conventions-and-style-system` mem).
+
+**Gotcha (layout):** with buttons appearing/disappearing (4) the bar width would jump; the
+fixed size (1) is what stabilises it, so implement them together. Feature 15 renders this
+same bar during path *creation* (buttons mostly disabled/empty then) — verify the
+conditional-render + fixed-width still looks right mid-draw (empty groups collapse but the
+bar keeps its width).
+
+**Verification for the batch:** `clj-kondo` 0/0 + `cljfmt` on every touched ns; frontend
+focused suite green (add cases: `select-all-nodes`, the shift+delete binding →
+`remove-node-with-segments`, the outside-editor paste building a `:path` shape); common
+suite if any `types/path` fn changes. Then the live by-hand pass (high-zoom insert for
+35, Ctrl+A/Shift+Del, node colour, outside/cross-editor paste, toolbar look) — automation
+can't enter edit mode this session (§7).
