@@ -23,10 +23,9 @@
 
 (defn esc-pressed
   "Translates Escape into the right editor stop signal for the current context.
-  Escape means four different things depending on state, so this is the single
+  Escape means three different things depending on state, so this is the single
   place that maps it onto the stop model:
 
-  - add-nodes toggle on  -> just turn the toggle off, keep the editor open;
   - pending segment, no `:edition` (a path still being created) -> `finish-path`,
     which creates the shape and continues its edition (a restart);
   - pending segment during edition -> `cancel-pending-segment`, dropping the
@@ -37,14 +36,10 @@
   (ptk/reify ::esc-pressed
     ptk/WatchEvent
     (watch [_ state _]
-      (let [id        (drp.state/get-path-id state)
-            pending?  (some? (get-in state [:workspace-local :edit-path id :last-point]))
-            add-nodes? (get-in state [:workspace-local :edit-path id :add-nodes])
-            edition   (get-in state [:workspace-local :edition])]
+      (let [id       (drp.state/get-path-id state)
+            pending? (some? (get-in state [:workspace-local :edit-path id :last-point]))
+            edition  (get-in state [:workspace-local :edition])]
         (cond
-          add-nodes?
-          (rx/of (drp/set-add-nodes false))
-
           (and pending? (nil? edition))
           (rx/of (drp.common/finish-path))
 
@@ -69,11 +64,6 @@
                      :command "shift++"
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/add-node))}
-
-   :add-nodes       {:tooltip "N"
-                     :command "n"
-                     :subsections [:path-editor]
-                     :fn #(st/emit! (drp/toggle-add-nodes))}
 
    :delete-node     {:tooltip (ds/supr)
                      :command ["del" "backspace"]

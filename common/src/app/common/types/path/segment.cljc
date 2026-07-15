@@ -719,6 +719,105 @@
 
     (into [] (mapcat process-segments) (d/enumerate content))))
 
+(defn collapse-handler
+  "Collapses the given handler onto its node, making that side of the segment
+  straight. A curve whose both control points become degenerate (each resting
+  on its own endpoint) is stored as a plain line-to. The opposite handler of
+  the node is left untouched."
+  [content index prefix]
+  (let [content (vec content)
+        node    (handler->node content index prefix)
+        [cx cy] (helpers/prefix->coords prefix)]
+    (if (and (some? node)
+             (= :curve-to (dm/get-in content [index :command])))
+      (impl/from-plain
+       (-> content
+           (assoc-in [index :params cx] (:x node))
+           (assoc-in [index :params cy] (:y node))
+           (remove-line-curves)))
+      (impl/from-plain content))))
+
+(defn toggle-segment-curve
+  "Toggles the segment at `index` between a straight line and a curve: a
+  line-to becomes a curve-to with default handles a third of the way from
+  each endpoint, and a curve-to drops its control points back to a line-to.
+  Move-to and close-path commands are left untouched."
+  [content index]
+  (let [content (vec content)
+        segment (get content index)
+        from    (helpers/segment->point (get content (dec index)))
+        to      (helpers/segment->point segment)]
+    (impl/from-plain
+     (case (:command segment)
+       :line-to
+       (if (some? from)
+         (let [v  (gpt/to-vec from to)
+               h1 (gpt/add from (gpt/scale v (/ 1 3)))
+               h2 (gpt/add from (gpt/scale v (/ 2 3)))]
+           (update content index helpers/update-curve-to h1 h2))
+         content)
+
+       :curve-to
+       (assoc content index {:command :line-to
+                             :params (select-keys (:params segment) [:x :y])})
+
+       content))))
+
+(defn remove-segments
+  "Removes the segment commands at the given indices, breaking their subpaths
+  open in place: each removed line/curve becomes a subpath break (its endpoint
+  starts a new subpath) and a removed close-path just leaves its subpath open.
+  A close-path belonging to a subpath broken elsewhere is materialized as a
+  line back to the subpath start so its geometry is preserved. Subpaths left
+  without segments (a lone move-to) are dropped."
+  [content indices]
+  (let [content (vec content)
+        indices (set indices)
+        n       (count content)
+
+        ;; subpath-start command index for every position
+        starts  (loop [i 0 start 0 acc (transient [])]
+                  (if (>= i n)
+                    (persistent! acc)
+                    (let [start (if (= :move-to (:command (nth content i))) i start)]
+                      (recur (inc i) start (conj! acc start)))))
+
+        broken  (into #{} (keep #(nth starts % nil)) indices)
+
+        content
+        (into []
+              (comp
+               (map-indexed
+                (fn [i cmd]
+                  (cond
+                    (contains? indices i)
+                    (when-not (= :close-path (:command cmd))
+                      {:command :move-to
+                       :params (select-keys (:params cmd) [:x :y])})
+
+                    ;; keep the closing line of a subpath that is being broken
+                    ;; elsewhere, otherwise its close target would change
+                    (and (= :close-path (:command cmd))
+                         (contains? broken (nth starts i)))
+                    {:command :line-to
+                     :params (-> (nth content (nth starts i))
+                                 (get :params)
+                                 (select-keys [:x :y]))}
+
+                    :else cmd)))
+               (remove nil?))
+              content)
+
+        subpaths
+        (reduce (fn [acc cmd]
+                  (if (or (= :move-to (:command cmd)) (empty? acc))
+                    (conj acc [cmd])
+                    (update acc (dec (count acc)) conj cmd)))
+                []
+                content)]
+    (impl/from-plain
+     (into [] (comp (filter #(> (count %) 1)) cat) subpaths))))
+
 ;; FIXME: rename to next-segment
 (defn next-node
   "Calculates the next-node to be inserted."

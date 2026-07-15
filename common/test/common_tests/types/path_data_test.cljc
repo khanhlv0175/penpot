@@ -1842,38 +1842,111 @@
              (mapv :params result)))))
 
 (t/deftest path-duplicate-node-content
-  ;; duplicating a node copies its incoming segment into a new subpath that
-  ;; starts attached to the node's predecessor (so the line keeps coming from
-  ;; the same place) and ends in one new node shifted by the offset. A subpath
-  ;; start (no incoming segment) yields nil.
+  ;; duplicating a node copies every incident segment as its own subpath: the
+  ;; far end stays attached to the original neighbor and the copies meet at
+  ;; one new node shifted by the offset (`:selected` marks the meeting nodes).
   (let [content (path/content
                  [{:command :move-to :params {:x 0.0 :y 0.0}}
                   {:command :line-to :params {:x 100.0 :y 0.0}}
                   {:command :curve-to :params {:x 200.0 :y 100.0 :c1x 100.0 :c1y 50.0 :c2x 150.0 :c2y 100.0}}])
         off     (gpt/point 10 10)]
-    ;; line node: attach at predecessor (0,0); new node (100,0) shifted to (110,10)
-    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
-              [:line-to {:x 110.0 :y 10.0}]]
-             (mapv (juxt :command :params) (path/duplicate-node-content content 1 off))))
-    ;; curve node: attach at predecessor (100,0); anchor and arriving handle
-    ;; (c2) shift, departing handle (c1) stays
-    (t/is (= [[:move-to {:x 100.0 :y 0.0}]
-              [:curve-to {:c1x 100.0 :c1y 50.0 :c2x 160.0 :c2y 110.0 :x 210.0 :y 110.0}]]
-             (mapv (juxt :command :params) (path/duplicate-node-content content 2 off))))
-    ;; without an offset the incoming segment is copied verbatim
-    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
-              [:line-to {:x 100.0 :y 0.0}]]
-             (mapv (juxt :command :params) (path/duplicate-node-content content 1 nil))))
-    ;; subpath start has no incoming segment: its outgoing segment is copied
-    ;; reversed — attach at the successor (100,0), new node on the start side
-    ;; (0,0) shifted to (10,10)
-    (t/is (= [[:move-to {:x 100.0 :y 0.0}]
-              [:line-to {:x 10.0 :y 10.0}]]
-             (mapv (juxt :command :params) (path/duplicate-node-content content 0 off))))
+    ;; interior node (100,0): incoming line attaches at (0,0); the outgoing
+    ;; curve is copied reversed (handles swapped) so it also ends at the new
+    ;; node, with the arriving handle shifted along
+    (let [{ext :content selected :selected} (path/duplicate-node-content content 1 off)]
+      (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+                [:line-to {:x 110.0 :y 10.0}]
+                [:move-to {:x 200.0 :y 100.0}]
+                [:curve-to {:x 110.0 :y 10.0 :c1x 150.0 :c1y 100.0 :c2x 110.0 :c2y 60.0}]]
+               (mapv (juxt :command :params) ext)))
+      (t/is (= #{1 3} selected)))
+    ;; endpoint node (200,100): only the incoming curve; anchor and arriving
+    ;; handle (c2) shift, departing handle (c1) stays
+    (let [{ext :content selected :selected} (path/duplicate-node-content content 2 off)]
+      (t/is (= [[:move-to {:x 100.0 :y 0.0}]
+                [:curve-to {:c1x 100.0 :c1y 50.0 :c2x 160.0 :c2y 110.0 :x 210.0 :y 110.0}]]
+               (mapv (juxt :command :params) ext)))
+      (t/is (= #{1} selected)))
+    ;; subpath start (0,0): only the outgoing line, copied reversed — attach
+    ;; at the successor (100,0), new node shifted to (10,10)
+    (let [{ext :content selected :selected} (path/duplicate-node-content content 0 off)]
+      (t/is (= [[:move-to {:x 100.0 :y 0.0}]
+                [:line-to {:x 10.0 :y 10.0}]]
+               (mapv (juxt :command :params) ext)))
+      (t/is (= #{1} selected)))
     ;; a lone point (subpath with only a move-to) is copied as an offset point
-    (let [lone (path/content [{:command :move-to :params {:x 5.0 :y 5.0}}])]
+    (let [lone (path/content [{:command :move-to :params {:x 5.0 :y 5.0}}])
+          {ext :content selected :selected} (path/duplicate-node-content lone 0 off)]
       (t/is (= [[:move-to {:x 15.0 :y 15.0}]]
-               (mapv (juxt :command :params) (path/duplicate-node-content lone 0 off)))))))
+               (mapv (juxt :command :params) ext)))
+      (t/is (= #{0} selected)))))
+
+(t/deftest segment-collapse-handler
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :curve-to :params {:x 100.0 :y 0.0 :c1x 20.0 :c1y 40.0 :c2x 80.0 :c2y 40.0}}])]
+    ;; collapsing one handler keeps the segment a curve; the other handler is
+    ;; untouched and the collapsed one rests on its node
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:curve-to {:x 100.0 :y 0.0 :c1x 0.0 :c1y 0.0 :c2x 80.0 :c2y 40.0}]]
+             (mapv (juxt :command :params) (path/collapse-handler content 1 :c1))))
+    ;; collapsing the second handler too degenerates the curve into a line-to
+    (let [collapsed (-> content
+                        (path/collapse-handler 1 :c1)
+                        (path/collapse-handler 1 :c2))]
+      (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+                [:line-to {:x 100.0 :y 0.0}]]
+               (mapv (juxt :command :params) collapsed))))))
+
+(t/deftest segment-toggle-segment-curve
+  (let [line  (path/content
+               [{:command :move-to :params {:x 0.0 :y 0.0}}
+                {:command :line-to :params {:x 90.0 :y 0.0}}])
+        curve (path/toggle-segment-curve line 1)]
+    ;; line -> curve: default handles a third of the way from each endpoint
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:curve-to {:x 90.0 :y 0.0 :c1x 30.0 :c1y 0.0 :c2x 60.0 :c2y 0.0}]]
+             (mapv (juxt :command :params) curve)))
+    ;; curve -> line: drops the control points
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:line-to {:x 90.0 :y 0.0}]]
+             (mapv (juxt :command :params) (path/toggle-segment-curve curve 1))))
+    ;; move-to / close-path are untouched
+    (t/is (= (vec line) (vec (path/toggle-segment-curve line 0))))))
+
+(t/deftest segment-remove-segments
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 20.0 :y 0.0}}
+                  {:command :line-to :params {:x 30.0 :y 0.0}}])]
+    ;; removing an interior segment opens the path in place, keeping both
+    ;; endpoint nodes
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:line-to {:x 10.0 :y 0.0}]
+              [:move-to {:x 20.0 :y 0.0}]
+              [:line-to {:x 30.0 :y 0.0}]]
+             (mapv (juxt :command :params) (path/remove-segments content #{2}))))
+    ;; removing the first segment drops the now-dangling start node
+    (t/is (= [[:move-to {:x 10.0 :y 0.0}]
+              [:line-to {:x 20.0 :y 0.0}]
+              [:line-to {:x 30.0 :y 0.0}]]
+             (mapv (juxt :command :params) (path/remove-segments content #{1}))))
+    ;; a closed subpath broken elsewhere keeps its closing line geometry
+    (let [closed (path/content
+                  [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 0.0}}
+                   {:command :line-to :params {:x 10.0 :y 10.0}}
+                   {:command :close-path :params {}}])]
+      (t/is (= [[:move-to {:x 10.0 :y 0.0}]
+                [:line-to {:x 10.0 :y 10.0}]
+                [:line-to {:x 0.0 :y 0.0}]]
+               (mapv (juxt :command :params) (path/remove-segments closed #{1}))))
+      ;; removing the close-path just leaves the subpath open
+      (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+                [:line-to {:x 10.0 :y 0.0}]
+                [:line-to {:x 10.0 :y 10.0}]]
+               (mapv (juxt :command :params) (path/remove-segments closed #{3})))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; BOOL OPERATIONS — INTERSECTION / DIFFERENCE / EXCLUSION

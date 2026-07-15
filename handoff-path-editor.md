@@ -1054,15 +1054,16 @@ Work planned on top of the polished editor, with required groundwork:
    check still owed** (Ctrl+D node → line from predecessor; Alt+drag node/segment; the reported
    segment-move artifact after Ctrl+D) — frontend REPL unresponsive and automation can't enter
    edit mode this session.
-- [ ] **Feature 34 — keyboard-modifier interaction matrix (click / drag × node / segment /
-   handler × move / draw).** Specified 2026-07-15, **NOT implemented** — specification and
-   clarification phase only. Full requirement, all user decisions, both mode matrices,
-   shared operation semantics, existing-feature impact, and open points are in **§14**.
-   Reworks how ctrl/alt/shift modify the six pointer actions (three targets × click/drag)
-   in both edit modes. Consequences: removes feature 17 (`n` toggle), supersedes feature
-   19's alt-rejoin, replaces feature 33's node-duplication geometry (all incident
-   segments, welded to original neighbors). Per-action cursors are pending — the user
-   will define them later.
+- [x] **Feature 34 — keyboard-modifier interaction matrix (click / drag × node / segment /
+   handler × move / draw).** Specified and **implemented 2026-07-15** (uncommitted). Full
+   requirement, all user decisions, both mode matrices, shared operation semantics,
+   existing-feature impact, open-point resolutions, and the implementation summary are in
+   **§14**. Reworks how ctrl/alt/shift modify the six pointer actions (three targets ×
+   click/drag) in both edit modes. Consequences: removes feature 17 (`n` toggle),
+   supersedes feature 19's alt-rejoin, replaces feature 33's node-duplication geometry
+   (all incident segments, welded to original neighbors; Ctrl+D inherits it). **Per-action
+   cursors are still pending** (the user will define them later) and the whole matrix owes
+   a live by-hand pass (automation cannot enter path edit mode).
 - [x] **Refactor — make the edition stop model explicit + document deferred ordering.**
    Completed 2026-07-13. **Scope note:** `clear-edition-mode` is *already* the single
    canonical stop (bugs 1/5/7 routed the exit watcher, `finish-edition?`, and most keying
@@ -1098,12 +1099,11 @@ for features 1–3, 8, 10, and 11 is complete.
   editor now close-loops the rendered drawing copy — see §5). **Bug 14 is fixed** (2026-07-14:
   keep SVG-default black in normal view per user decision; edition copy now inherits the
   group's resolved fill so it no longer goes transparent — see §5).
-- **Feature 34 — keyboard-modifier interaction matrix — SPECIFIED 2026-07-15, NOT
-  implemented.** This is the next implementation task. The complete spec (user matrices,
-  clarification decisions, semantics, existing-feature impact, open points, and
-  implementation-surface pointers) lives in **§14**; read it in full before touching
-  code. It removes feature 17, supersedes feature 19's alt-rejoin, and changes feature
-  33's node-duplication geometry.
+- **Feature 34 — keyboard-modifier interaction matrix — specified AND implemented
+  2026-07-15 (uncommitted).** The complete spec and the implementation summary live in
+  **§14**. Still open there: the per-action **cursor set** (user will define it) and the
+  **live by-hand pass** over the whole matrix. It removed feature 17, superseded feature
+  19's alt-rejoin, and changed feature 33's node-duplication geometry (Ctrl+D included).
 - The stop-signal / deferred-ordering refactor is done (see §6 entry above).
 - **Testing — store-driven safety net expanded 2026-07-13** (see §7): added path-local
   undo/redo and tool-op-through-lifecycle (`make-curve`/`remove-node`) coverage on top of
@@ -1479,15 +1479,16 @@ records the trade-off, not a plan; promote to a numbered bug/feature only once d
     "did any subpath actually close?" guard before the repack/write-back so the change set
     (and sync/history churn) is limited to the shapes that genuinely need fixing.
 
-## 14. Feature 34 spec — keyboard-modifier interaction matrix (2026-07-15, NOT implemented)
+## 14. Feature 34 — keyboard-modifier interaction matrix (specified + implemented 2026-07-15)
 
-Specification/clarification phase only — **no code has been written for this**. The
-matrices below are the user's requirement; every ambiguity was resolved with the user in
-a Q&A on 2026-07-15 and the decisions are inlined (marked "user-confirmed" where they
-came from that Q&A rather than the original request). **Cursors:** several cells will
-need a dedicated pointer cursor; the user will define the cursor set later — design the
-implementation so the hovered target kind + live modifiers can drive a per-cell cursor,
-but leave the actual cursor mapping open.
+The matrices below are the user's requirement; every ambiguity was resolved with the user
+in a Q&A on 2026-07-15 and the decisions are inlined (marked "user-confirmed" where they
+came from that Q&A rather than the original request). **Implemented the same day** — see
+the implementation summary at the end of this section. **Cursors:** several cells will
+need a dedicated pointer cursor; the user will define the cursor set later — the hovered
+target kind + live modifiers can drive a per-cell cursor (the insert-anywhere preview
+already derives from `ms/keyboard-mod` live), but the cursor mapping itself is still
+open.
 
 ### General rules (user-confirmed)
 
@@ -1583,24 +1584,32 @@ Shift = 15° constraint from the previous point, uniformly (see general rules).
   30** (segment-removal semantics), **feature 7** (heal removal), and the features
   1/3/8 selection model are reused as the corresponding cells.
 
-### Open points for the implementer (small; confirm with the user when reached)
+### Open points — resolutions taken by the implementation (2026-07-15)
 
-1. **Ctrl+D node duplication** — the spec covers only alt+drag; recommend aligning
-   Ctrl+D's node geometry with the new all-incident-segments rule for consistency (the
-   segment part already matches).
-2. **Unspecified draw-mode cells** (alt / ctrl+alt drags on segments and nodes,
-   modifiers on canvas clicks): recommend treating them as no-ops that still perform the
-   combo's click action on release, mirroring the move-mode "nothing" rule — confirm.
-3. **Cursor set** — the user will define per-action cursors later; implement hover-time
-   action detection (target kind + live modifiers) so a cursor can be attached per cell.
-4. **Weld onto the current subpath's own start** — the general any-node weld with
-   pending-clear should subsume today's close-on-start-node flow
-   (`close-path-drag-start`); confirm the closed loop still gets its `close-path`
-   treatment (bug 12) through the normal persistence path.
-5. **Selection side-effects of toggle/removal clicks** — unspecified whether e.g.
-   ctrl+click flat/curved also selects the node. Recommendation: leave the selection
-   unchanged, except removals prune the deleted element (and any now-invalid indices)
-   from the selection.
+1. **Ctrl+D node duplication** — resolved by construction: `duplicate-selected` shares
+   `helpers/duplicate-selection-content`, which now uses the new all-incident-segments
+   geometry, so Ctrl+D and Alt+drag are automatically consistent.
+2. **Unspecified draw-mode cells** — draw-mode alt / mod+alt on nodes and segments act
+   **immediately at pointer-down** (the removal happens whether or not the user then
+   drags; there is no drag action for those combos). Canvas clicks with modifiers keep
+   the no-modifier behavior (the draw loop does not inspect modifiers).
+3. **Cursor set** — still open; the user will define per-action cursors. The
+   insert-anywhere preview already reacts to the live platform modifier
+   (`ms/keyboard-mod`), which is the same signal a per-cell cursor should key on.
+4. **Weld onto the current subpath's own start** — the draw-mode no-modifier node click
+   keeps routing through `close-path-drag-start` (which always accepted any node
+   position), so the close-on-start-node flow and bug 12's close-loops treatment are
+   untouched.
+5. **Selection side-effects of toggle/removal clicks** — toggles/removals leave the
+   selection unchanged except pruning: `remap-selection` drops handler ids whose command
+   is no longer a curve and (new) segment ids whose command became a subpath-break
+   move-to; structural changes re-resolve nodes by position as before.
+6. **Mirror/aligned with no opposite handle** (found during implementation) — a handler
+   whose node's other side is a plain `line-to` has no opposite handle
+   (`opposite-index` only yields curve handlers); `:mirror`/`:aligned` then move only
+   the dragged handler and never create a handle on the line side — the same limitation
+   feature 19's rejoin had. Promote to a follow-up only if the user asks for
+   mirror-creating-a-handle.
 
 ### Implementation surface (pointers, not a plan)
 
@@ -1626,3 +1635,76 @@ Shift = 15° constraint from the previous point, uniformly (see general rules).
   or otherwise feed the pending-segment state (PP cells).
 - Removing feature 17 touches `tools.cljs`, `shortcuts.cljs`, `path_actions.cljs`, the
   `esc-pressed` first branch, and the `workspace.path.actions.add-nodes` i18n key.
+
+### Implementation summary (2026-07-15, uncommitted)
+
+Everything in the matrices above is implemented except the cursor set (open point 3).
+
+**Common layer** (`types/path/segment.cljc` + `path.cljc` wrappers):
+- `collapse-handler [content index prefix]` — handler onto its node;
+  `remove-line-curves` then stores a fully degenerate curve as `line-to`.
+- `toggle-segment-curve [content index]` — line-to ↔ curve-to (1/3 default handles);
+  move-to/close-path untouched.
+- `remove-segments [content indices]` — removed line/curve becomes a subpath-break
+  move-to (a removed close-path is just dropped); a close-path of a subpath broken
+  elsewhere is first materialized as a line to its start (geometry preserved); lone
+  move-to subpaths dropped. `path/is-curve-point?` wraps `segment/is-curve?`.
+- `duplicate-node-content` **rewritten** to the all-incident rule; new contract
+  `{:content <commands> :selected #{relative new-node indices}}` (an outgoing segment is
+  copied reversed via the existing `reverse-segment`, arriving handle shifted along).
+
+**Frontend data layer:**
+- `helpers.cljs`: `align-handler-modifiers` (angle-mirror keeping the opposite's own
+  length, forced on corners); `duplicate-selection-content` consumes the new
+  duplicate contract; `remap-selection` also prunes segment ids that became move-tos.
+- `tools.cljs`: `remove-node` gained a point arity; new events `toggle-node-curve`
+  (index → make-corner/make-curve via `is-curve-point?`), `remove-segments`/
+  `remove-segment`, `remove-node-with-segments` (incident entries → `remove-segments`),
+  `toggle-segment-curve`, `remove-handler`; `set-add-nodes`/`toggle-add-nodes` deleted.
+- `edition.cljs`: `modify-selected-handlers` takes a **mode** (`:smart`/`:mirror`/
+  `:independent`/`:aligned`; non-smart modes act on the grabbed handler only, mirror =
+  `move-handler-modifiers` with `rejoin?`+match flags, aligned = the new helper);
+  `drag-selected-handlers [primary mode]` (shift stays live, alt no longer read
+  mid-drag); `start-move-handler [index prefix shift? alt? mod?]`,
+  `start-move-path-point [index shift? alt? mod?]` and
+  `start-move-path-segment [index shift? alt? mod?]` are the move-mode dispatchers
+  implementing the matrix (mod+alt cells = `drag-stream(rx/empty, click-action)`);
+  `start-segment-drag`/`start-node-drag` dissolved into them (`ms/mouse-position-mod`
+  deref gone — everything captured from the DOM event); new
+  `curve-config-node-drag [index]` + `curve-config-modifier` (symmetric handles: `:c1`
+  of the outgoing command at cursor, `:c2` of the incoming command mirrored; delta base
+  of a missing handle = the node, matching `apply-content-modifiers`' line→curve
+  promotion); `start-path-edit` no longer seeds `:add-nodes`.
+- `drawing.cljs`: new draw-mode dispatchers `on-draw-node-pointer-down [index position
+  alt? mod?]` (mod+alt/alt remove immediately with the pending-origin
+  `cancel-pending-segment` caveat; mod = toggle/curve-config via drag-stream; otherwise
+  the pre-existing reset-last-handler / start-path-from-point / close-path-drag-start
+  flow) and `on-draw-segment-pointer-down [index alt? mod?]` (alt/mod+alt remove; mod =
+  toggle-segment-curve on click / bend on drag, close-path guarded; no-modifier =
+  `insertion-point` anywhere (16px/zoom) → `create-node-at-position` then
+  `close-path-drag-start` (pending, weld+clear) or `start-path-from-point` (no
+  pending)). Requires `tools` + `ms` (acyclic).
+- `shortcuts.cljs`: `n` binding and the esc add-nodes branch removed.
+- `path.cljs`: exports updated (new tools events + draw dispatchers; add-nodes gone).
+
+**UI:**
+- `editor.cljs`: `path-point*`/`path-segment*`/`path-handler*` pointer-downs thread
+  shift/alt/mod from the DOM event into the dispatchers; the inline mod-click
+  make-curve/corner branch and the `is-last`/`is-start-path`/`is-curve` props are gone
+  (that logic lives in the events now); segments are **interactive in draw mode too**
+  (`:edit-mode` prop routes to the draw dispatcher); the insert preview keys on
+  `(rx/combine-latest ms/mouse-position ms/keyboard-mod)` so pressing/releasing the
+  platform modifier flips middle-only ↔ anywhere without moving the pointer.
+- `path_actions.cljs`: add-nodes toolbar button gone; `en.po` key removed.
+
+**Verification:** clj-kondo 0/0 (full frontend+common lint), `cljfmt` clean both
+modules, main CLJS build `:ok`; common suite **1114 tests / 24610 assertions** (focused
+path-data 150/484 — new `segment-collapse-handler`, `segment-toggle-segment-curve`,
+`segment-remove-segments`, rewritten `path-duplicate-node-content`); frontend focused
+suite **54 tests / 146 assertions, 0 failures** (renamed handler-mode tests
+`handler-drag-{smart,independent,mirror}-…`, new `handler-drag-aligned-…`,
+`remove-handler-collapses-…`, `toggle-segment-curve-switches-…`,
+`remove-segment-opens-…`, `remove-node-with-segments-opens-a-gap`, interior-node case in
+`duplicate-selection-content-…`). **Owed:** the live by-hand pass over the whole matrix
+(hover preview with ctrl, curve-config drag feel, draw-mode weld + pending-clear, the
+four handler modes, mod+alt no-ops, removals in both modes) and the cursor set.

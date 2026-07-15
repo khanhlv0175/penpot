@@ -77,8 +77,102 @@
 (defn add-node []
   (process-path-tool (fn [content points] (path/split-segments content points 0.5))))
 
-(defn remove-node []
-  (process-path-tool path/remove-nodes))
+(defn remove-node
+  "Removes the selected nodes (or the node at `point`), healing the gap with a
+  fitted curve between the surviving neighbors."
+  ([]
+   (process-path-tool path/remove-nodes))
+  ([point]
+   (process-path-tool #{point} path/remove-nodes)))
+
+(defn toggle-node-curve
+  "Toggles the node at the given content index between a corner (its handles
+  collapsed) and a curve (default handles toward its neighbors)."
+  [index]
+  (ptk/reify ::toggle-node-curve
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [content (st/get-path state :content)]
+        (when (and (some? content)
+                   (< index (count content))
+                   (helpers/node? content index))
+          (let [point (helpers/node-position content index)]
+            (rx/of (if (path/is-curve-point? content point)
+                     (make-corner point)
+                     (make-curve point)))))))))
+
+(defn- update-path-content
+  "Replaces the edited path content, refreshing its geometry and remapping the
+  grouped selection to the new structure."
+  [state new-content]
+  (let [id          (st/get-path-id state)
+        old-content (st/get-path state :content)]
+    (-> (cond-> (st/set-content state new-content)
+          (seq new-content)
+          (update-in (st/get-path-location state) path/update-geometry))
+        (update-in [:workspace-local :edit-path id :selection]
+                   #(helpers/remap-selection % old-content new-content)))))
+
+(defn remove-segments
+  "Removes the given segment command indices, opening the path there: the
+  endpoint nodes stay in place and ends left dangling are dropped."
+  [indices]
+  (ptk/reify ::remove-segments
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [content (st/get-path state :content)]
+        (if (and (some? content) (seq indices))
+          (update-path-content state (path/remove-segments content indices))
+          state)))
+
+    ptk/WatchEvent
+    (watch [_ state _]
+      (when (empty? (st/get-path state :content))
+        (rx/of (dwe/clear-edition-mode))))))
+
+(defn remove-segment
+  [index]
+  (remove-segments #{index}))
+
+(defn remove-node-with-segments
+  "Removes the node at the given index together with every segment incident to
+  it, leaving an open gap (no healing)."
+  [index]
+  (ptk/reify ::remove-node-with-segments
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [content  (st/get-path state :content)
+            incident (into #{}
+                           (comp (filter #(or (= index (:to-index %))
+                                              (= index (:from-index %))))
+                                 (map :index))
+                           (helpers/segment-entries content))]
+        (when (seq incident)
+          (rx/of (remove-segments incident)))))))
+
+(defn toggle-segment-curve
+  "Toggles the segment at the given index between a straight line and a curve
+  with default handles a third of the way from each endpoint."
+  [index]
+  (ptk/reify ::toggle-segment-curve
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [content (st/get-path state :content)]
+        (if (some? content)
+          (update-path-content state (path/toggle-segment-curve content index))
+          state)))))
+
+(defn remove-handler
+  "Collapses the clicked handler onto its node, making that side of the
+  segment straight; the matching handler is untouched."
+  [index prefix]
+  (ptk/reify ::remove-handler
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [content (st/get-path state :content)]
+        (if (some? content)
+          (update-path-content state (path/collapse-handler content index prefix))
+          state)))))
 
 (defn merge-nodes []
   (process-path-tool path/merge-nodes))
@@ -160,20 +254,3 @@
     (update [_ state]
       (let [id (st/get-path-id state)]
         (update-in state [:workspace-local :edit-path id :snap-toggled] not)))))
-
-(defn set-add-nodes
-  "Enables/disables the add-nodes state (a sub-state of move mode: while active,
-  hovering a segment previews a node and clicking inserts it)."
-  [enabled?]
-  (ptk/reify ::set-add-nodes
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [id (st/get-path-id state)]
-        (assoc-in state [:workspace-local :edit-path id :add-nodes] enabled?)))))
-
-(defn toggle-add-nodes []
-  (ptk/reify ::toggle-add-nodes
-    ptk/UpdateEvent
-    (update [_ state]
-      (let [id (st/get-path-id state)]
-        (update-in state [:workspace-local :edit-path id :add-nodes] not)))))

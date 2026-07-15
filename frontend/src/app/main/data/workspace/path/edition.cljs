@@ -41,14 +41,30 @@
       (empty? (get modifiers index)) (dissoc index))))
 
 (defn modify-selected-handlers
-  [id primary start-modifiers dx dy alt?]
+  "Applies a handler drag. `mode` decides what happens to the matching
+  (opposite) handler of each dragged one:
+
+  - `:smart`       preserve the node's current state — a joined pair stays
+                   joined (the opposite mirrors the angle, keeping its own
+                   length), a corner pair moves independently; acts on the
+                   whole handler selection.
+  - `:mirror`      force the opposite onto the exact mirror (same length and
+                   opposite angle), re-joining a corner pair.
+  - `:independent` never touch the opposite.
+  - `:aligned`     force the opposite to mirror the angle while keeping its
+                   own length, even on a corner pair.
+
+  The non-`:smart` modes act only on the grabbed handler."
+  [id primary start-modifiers dx dy mode]
   (ptk/reify ::modify-selected-handlers
     ptk/UpdateEvent
     (update [_ state]
       (let [content           (st/get-path state :content)
-            selected-handlers (dm/get-in state
-                                         [:workspace-local :edit-path id :selection :handlers]
-                                         #{})
+            selected-handlers (if (= mode :smart)
+                                (dm/get-in state
+                                           [:workspace-local :edit-path id :selection :handlers]
+                                           #{})
+                                #{primary})
             ;; A stale identity whose command is no longer a curve must not
             ;; receive deltas: handler modifiers over a line-to would convert
             ;; it back into a curve.
@@ -65,22 +81,49 @@
                (let [start-delta    (handler-modifier-delta start-modifiers index prefix)
                      delta          (gpt/add start-delta move-delta)
                      opposite-id    (path/opposite-index content index prefix)
-                     opposite-selected? (contains? selected-handlers opposite-id)
-                     ;; Alt toggles the handler join in both directions: a
-                     ;; currently smooth (joined) pair breaks apart, and a
-                     ;; currently independent pair re-joins into a mirror.
+                     opposite-selected? (and (= mode :smart)
+                                             (contains? selected-handlers opposite-id))
                      joined?        (helpers/handlers-joined? content index prefix)
-                     match-opposite? (and joined? (not alt?) (not opposite-selected?))
-                     rejoin?        (and (not joined?) alt? (not opposite-selected?))
                      handler-modifiers
-                     (cond-> (helpers/move-handler-modifiers content
-                                                             index
-                                                             prefix
-                                                             false
-                                                             match-opposite?
-                                                             rejoin?
-                                                             (:x delta)
-                                                             (:y delta))
+                     (case mode
+                       :aligned
+                       (helpers/align-handler-modifiers content
+                                                        index
+                                                        prefix
+                                                        (:x delta)
+                                                        (:y delta))
+
+                       :mirror
+                       (helpers/move-handler-modifiers content
+                                                       index
+                                                       prefix
+                                                       true
+                                                       true
+                                                       true
+                                                       (:x delta)
+                                                       (:y delta))
+
+                       :independent
+                       (helpers/move-handler-modifiers content
+                                                       index
+                                                       prefix
+                                                       false
+                                                       false
+                                                       false
+                                                       (:x delta)
+                                                       (:y delta))
+
+                       ;; :smart
+                       (helpers/move-handler-modifiers content
+                                                       index
+                                                       prefix
+                                                       false
+                                                       (and joined? (not opposite-selected?))
+                                                       false
+                                                       (:x delta)
+                                                       (:y delta)))
+                     handler-modifiers
+                     (cond-> handler-modifiers
                        opposite-selected?
                        (remove-handler-modifier opposite-id))]
                  (d/deep-merge modifiers handler-modifiers)))
@@ -298,8 +341,8 @@
 (defn- duplicate-and-drag
   "Alt+drag: duplicates the current node/segment selection and drags the copy
   from `start-position`. Dragging the duplicated endpoint nodes translates a
-  copied segment; a duplicated node tracks the pointer while its line stays
-  attached to the original's predecessor."
+  copied segment; a duplicated node tracks the pointer while its copied
+  incident segments stay attached to the original neighbors."
   [start-position]
   (ptk/reify ::duplicate-and-drag
     ptk/WatchEvent
@@ -313,32 +356,53 @@
                  (drag-selected-points start-position))
           (rx/of (drag-selected-points start-position)))))))
 
-(defn- start-node-drag
-  "Dispatches a node pointer-drag: with Alt held it duplicates the selection
-  and drags the copy; otherwise it drags the selection. `alt?` is captured from
-  the pointer-down DOM event (reading the `ms/mouse-position-alt` behavior
-  subject here lags one pointer event behind, making Alt detection flaky)."
-  [start-position alt?]
-  (ptk/reify ::start-node-drag
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (if alt?
-        (rx/of (duplicate-and-drag start-position))
-        (rx/of (drag-selected-points start-position))))))
+(declare curve-config-node-drag)
 
 (defn start-move-path-point
-  [index shift? alt?]
+  "Node pointer-down dispatcher (move mode). The action is decided from the
+  modifiers captured on the DOM event: a plain/shift gesture selects on click
+  and drags the selection; alt selects on click and duplicates the selection
+  on drag; the platform modifier toggles corner/curve on click and reshapes
+  the node's curve on drag; mod+alt removes the node (healing the gap) on
+  click and does nothing on drag."
+  [index shift? alt? mod?]
   (ptk/reify ::start-move-path-point
     ptk/WatchEvent
     (watch [_ state _]
-      (let [id (dm/get-in state [:workspace-local :edition])
+      (let [id (st/get-path-id state)
             selected-nodes (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
-            selected? (contains? selected-nodes index)]
-        (streams/drag-stream
-         (rx/of
-          (when-not selected? (selection/select-node index shift?))
-          (start-node-drag @ms/mouse-position alt?))
-         (rx/of (selection/select-node index shift?)))))))
+            selected? (contains? selected-nodes index)
+            content   (st/get-path state :content)
+            position  (when (and (some? content)
+                                 (< index (count content))
+                                 (helpers/node? content index))
+                        (helpers/node-position content index))]
+        (cond
+          (and mod? alt?)
+          (streams/drag-stream
+           (rx/empty)
+           (if (some? position)
+             (rx/of (tools/remove-node position))
+             (rx/empty)))
+
+          mod?
+          (streams/drag-stream
+           (rx/of (curve-config-node-drag index))
+           (rx/of (tools/toggle-node-curve index)))
+
+          alt?
+          (streams/drag-stream
+           (rx/of
+            (when-not selected? (selection/select-node index false))
+            (duplicate-and-drag @ms/mouse-position))
+           (rx/of (selection/select-node index false)))
+
+          :else
+          (streams/drag-stream
+           (rx/of
+            (when-not selected? (selection/select-node index shift?))
+            (drag-selected-points @ms/mouse-position))
+           (rx/of (selection/select-node index shift?))))))))
 
 (defn drag-selected-points
   [start-position]
@@ -368,41 +432,67 @@
                 (merge-dragged-on-drop)))))))
 
 (declare drag-selected-segments)
-(declare start-segment-drag)
 (declare bend-selected-segment)
 (declare create-node-at-position)
 
 (defn start-move-path-segment
-  [index shift? alt?]
+  "Segment pointer-down dispatcher (move mode). The action is decided from
+  the modifiers captured on the DOM event: a plain click selects the segment
+  (near its visual middle it inserts a node instead) and a plain/shift drag
+  translates the selection; the platform modifier inserts a node anywhere on
+  click and bends the segment on drag; alt selects on click and duplicates the
+  selection on drag; mod+alt removes the segment on click and does nothing on
+  drag."
+  [index shift? alt? mod?]
   (ptk/reify ::start-move-path-segment
     ptk/WatchEvent
     (watch [_ state _]
-      (let [id                (dm/get-in state [:workspace-local :edition])
+      (let [id                (st/get-path-id state)
             zoom              (dm/get-in state [:workspace-local :zoom] 1)
-            add-nodes?        (dm/get-in state [:workspace-local :edit-path id :add-nodes])
             content           (st/get-path state :content)
             selected-segments (dm/get-in state
                                          [:workspace-local :edit-path id :selection :segments]
                                          #{})
             selected?         (contains? selected-segments index)
+            position          @ms/mouse-position
+            threshold         (/ helpers/segment-insert-threshold zoom)]
+        (cond
+          (and mod? alt?)
+          (streams/drag-stream
+           (rx/empty)
+           (rx/of (tools/remove-segment index)))
 
-            ;; A plain click selects the segment, except near its exact middle
-            ;; where it inserts a node instead (feature 16); with the add-nodes
-            ;; toggle a click anywhere on the path inserts. A drag still
-            ;; bends/translates the segment (handled by the drag branch).
-            insert-point      (helpers/insertion-point
-                               content @ms/mouse-position
-                               (/ helpers/segment-insert-threshold zoom)
-                               add-nodes?)
+          mod?
+          (let [entry        (d/seek #(= index (:index %)) (helpers/segment-entries content))
+                bend?        (and (some? entry)
+                                  (not= :close-path (:command (:segment entry))))
+                insert-point (helpers/insertion-point content position threshold true)]
+            (streams/drag-stream
+             (if bend?
+               (rx/of (bend-selected-segment index position))
+               (rx/of (drag-selected-segments position)))
+             (if (some? insert-point)
+               (rx/of (create-node-at-position (meta insert-point)))
+               (rx/empty))))
 
-            click-event       (if (some? insert-point)
-                                (create-node-at-position (meta insert-point))
-                                (selection/select-segment index shift?))]
-        (streams/drag-stream
-         (rx/of
-          (when-not selected? (selection/select-segment index shift?))
-          (start-segment-drag index @ms/mouse-position alt?))
-         (rx/of click-event))))))
+          alt?
+          (streams/drag-stream
+           (rx/of
+            (when-not selected? (selection/select-segment index false))
+            (duplicate-and-drag position))
+           (rx/of (selection/select-segment index false)))
+
+          :else
+          (let [insert-point (when-not shift?
+                               (helpers/insertion-point content position threshold false))
+                click-event  (if (some? insert-point)
+                               (create-node-at-position (meta insert-point))
+                               (selection/select-segment index shift?))]
+            (streams/drag-stream
+             (rx/of
+              (when-not selected? (selection/select-segment index shift?))
+              (drag-selected-segments position))
+             (rx/of click-event))))))))
 
 (defn- segment-entry
   [content index]
@@ -415,32 +505,6 @@
   (if (= :curve-to (:command segment))
     [from to (path/get-handler segment :c1) (path/get-handler segment :c2)]
     [from to from to]))
-
-(defn- start-segment-drag
-  "Dispatches a segment pointer-drag: with Alt held it duplicates the selection
-  and drags the copy; with the platform modifier held, the grabbed segment
-  bends through the pointer while its endpoint nodes stay fixed; otherwise the
-  selected segments translate. Closing (`close-path`) segments carry no handles
-  and always translate. `alt?` is captured from the pointer-down DOM event (the
-  `ms/mouse-position-alt` behavior subject lags one pointer event behind here)."
-  [index start-position alt?]
-  (ptk/reify ::start-segment-drag
-    ptk/WatchEvent
-    (watch [_ state _]
-      (let [content (st/get-path state :content)
-            entry   (segment-entry content index)
-            bend?   (and (deref ms/mouse-position-mod)
-                         (some? entry)
-                         (not= :close-path (:command (:segment entry))))]
-        (cond
-          alt?
-          (rx/of (duplicate-and-drag start-position))
-
-          bend?
-          (rx/of (bend-selected-segment index start-position))
-
-          :else
-          (rx/of (drag-selected-segments start-position)))))))
 
 (defn drag-selected-segments
   [start-position]
@@ -500,6 +564,85 @@
               (rx/map #(bend-segment-modifier index base-curve t %))
               (rx/take-until stopper))
          (rx/of (apply-content-modifiers)))))))
+
+(defn- curve-config-modifier
+  "Sets the content-modifiers that give a node symmetric handles: the outgoing
+  handle (`:c1` of `out-index`) lands on `position` and the incoming handle
+  (`:c2` of `in-index`) mirrors it across the node."
+  [node in-index in-base out-index out-base position]
+  (ptk/reify ::curve-config-modifier
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id        (st/get-path-id state)
+            v         (gpt/to-vec node position)
+            modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
+            modifiers (cond-> modifiers
+                        (some? in-index)
+                        (assoc in-index
+                               (let [target (gpt/subtract node v)]
+                                 {:c2x (- (:x target) (:x in-base))
+                                  :c2y (- (:y target) (:y in-base))}))
+
+                        (some? out-index)
+                        (assoc out-index
+                               (let [target (gpt/add node v)]
+                                 {:c1x (- (:x target) (:x out-base))
+                                  :c1y (- (:y target) (:y out-base))})))]
+        (assoc-in state [:workspace-local :edit-path id :content-modifiers] modifiers)))))
+
+(defn curve-config-node-drag
+  "Mod+drag on a node: reshapes its curve as if the node were being created
+  for the first time — mirrored equal handles following the pointer (the
+  outgoing handle tracks the cursor, the incoming one mirrors it across the
+  node). Any existing handles of the node are replaced."
+  [index]
+  (ptk/reify ::curve-config-node-drag
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [content  (st/get-path state :content)
+            node     (when (and (some? content)
+                                (< index (count content))
+                                (helpers/node? content index))
+                       (helpers/node-position content index))
+            in-cmd   (nth content index nil)
+            out-cmd  (nth content (inc index) nil)
+            in?      (contains? #{:line-to :curve-to} (:command in-cmd))
+            out?     (contains? #{:line-to :curve-to} (:command out-cmd))
+            ;; a promoted line-to gets its handles at the segment endpoints,
+            ;; so the delta base of a missing handle is the node itself
+            in-base  (when in?
+                       (if (= :curve-to (:command in-cmd))
+                         (path/get-handler in-cmd :c2)
+                         node))
+            out-base (when out?
+                       (if (= :curve-to (:command out-cmd))
+                         (path/get-handler out-cmd :c1)
+                         node))
+            stopper  (rx/merge
+                      (mse/drag-stopper stream)
+                      (->> stream
+                           (rx/filter streams/finish-edition?)))]
+        (if (and (some? node) (or in? out?))
+          (rx/concat
+           (->> ms/mouse-position
+                (rx/filter gpt/point?)
+                (rx/with-latest-from
+                  (fn [position shift?]
+                    (assoc position :shift? shift?))
+                  ms/mouse-position-shift)
+                (rx/map
+                 (fn [{:keys [x y shift?]}]
+                   (let [position (cond-> (gpt/point x y)
+                                    shift? (path.helpers/position-fixed-angle node))]
+                     (curve-config-modifier node
+                                            (when in? index)
+                                            in-base
+                                            (when out? (inc index))
+                                            out-base
+                                            position))))
+                (rx/take-until stopper))
+           (rx/of (apply-content-modifiers)))
+          (rx/empty))))))
 
 (defn- get-displacement
   "Retrieve the correct displacement delta point for the
@@ -586,27 +729,42 @@
 (declare drag-selected-handlers)
 
 (defn start-move-handler
-  ([index prefix]
-   (start-move-handler index prefix false))
-  ([index prefix shift?]
-   (ptk/reify ::start-move-handler
-     ptk/WatchEvent
-     (watch [_ state _]
-       (let [id                (st/get-path-id state)
-             handler-id        [index prefix]
-             selected-handlers (dm/get-in state
-                                          [:workspace-local :edit-path id :selection :handlers]
-                                          #{})
-             selected?         (contains? selected-handlers handler-id)]
-         (streams/drag-stream
-          (rx/of
-           (when-not selected?
-             (selection/select-handler index prefix shift?))
-           (drag-selected-handlers handler-id))
-          (rx/of (selection/select-handler index prefix shift?))))))))
+  "Handler pointer-down dispatcher (both edit modes). The action is decided
+  from the modifiers captured on the DOM event: a plain/shift gesture selects
+  on click and drags with the `:smart` join behavior; mod or alt remove the
+  handler on click and drag with the `:mirror` / `:independent` behavior;
+  mod+alt does nothing on click and drags with the `:aligned` behavior."
+  [index prefix shift? alt? mod?]
+  (ptk/reify ::start-move-handler
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id                (st/get-path-id state)
+            handler-id        [index prefix]
+            selected-handlers (dm/get-in state
+                                         [:workspace-local :edit-path id :selection :handlers]
+                                         #{})
+            selected?         (contains? selected-handlers handler-id)]
+        (cond
+          (and mod? alt?)
+          (streams/drag-stream
+           (rx/of (drag-selected-handlers handler-id :aligned))
+           (rx/empty))
+
+          (or mod? alt?)
+          (streams/drag-stream
+           (rx/of (drag-selected-handlers handler-id (if mod? :mirror :independent)))
+           (rx/of (tools/remove-handler index prefix)))
+
+          :else
+          (streams/drag-stream
+           (rx/of
+            (when-not selected?
+              (selection/select-handler index prefix shift?))
+            (drag-selected-handlers handler-id :smart))
+           (rx/of (selection/select-handler index prefix shift?))))))))
 
 (defn drag-selected-handlers
-  [[index prefix :as primary]]
+  [[index prefix :as primary] mode]
   (ptk/reify ::drag-selected-handlers
     ptk/WatchEvent
     (watch [_ state stream]
@@ -633,7 +791,7 @@
         (rx/concat
          (->> (streams/move-handler-stream handler point handler opposite points)
               (rx/map
-               (fn [{:keys [x y alt? shift?]}]
+               (fn [{:keys [x y shift?]}]
                  (let [position (cond-> (gpt/point x y)
                                   shift? (path.helpers/position-fixed-angle point))
                        delta    (gpt/subtract position handler)]
@@ -642,7 +800,7 @@
                                              start-modifiers
                                              (:x delta)
                                              (:y delta)
-                                             alt?))))
+                                             mode))))
               (rx/take-until stopper))
          (rx/of (apply-content-modifiers)))))))
 
@@ -690,8 +848,7 @@
                                        {:edit-mode :move
                                         :selection helpers/empty-selection
                                         :hover helpers/empty-selection
-                                        :snap-toggled true
-                                        :add-nodes false})]
+                                        :snap-toggled true})]
                            (assoc state :old-content (:content shape))))))))
 
     ptk/WatchEvent

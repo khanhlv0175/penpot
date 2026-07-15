@@ -8539,10 +8539,6 @@ msgstr "Y axis"
 msgid "workspace.path.actions.add-node"
 msgstr "Add node (%s)"
 
-#: src/app/main/ui/workspace/viewport/path_actions.cljs
-msgid "workspace.path.actions.add-nodes"
-msgstr "Add nodes (%s)"
-
 #: src/app/main/ui/workspace/viewport/path_actions.cljs:173
 msgid "workspace.path.actions.delete-node"
 msgstr "Delete node (%s)"

@@ -113,6 +113,30 @@
            (and (some? op-idx) (= opposite node) match-distance? match-angle?)
            (update op-idx assoc ocx (- (:x hnv)) ocy (- (:y hnv))))))))
 
+(defn align-handler-modifiers
+  "Modifiers that move the handler by `[dx dy]` and rotate its opposite so the
+  pair stays mirror-aligned (~180°), the opposite keeping its own length. The
+  alignment is forced even when the pair is currently a corner."
+  [content index prefix dx dy]
+  (let [[cx cy]            (path.helpers/prefix->coords prefix)
+        [op-idx op-prefix] (path/opposite-index content index prefix)
+        node               (path/handler->node content index prefix)
+        opposite           (when (some? op-idx)
+                             (path/get-handler-point content op-idx op-prefix))
+        handler            (path/get-handler-point content index prefix)
+        modifiers          (-> {} (update index assoc cx dx cy dy))]
+    (if (and (some? handler) (some? opposite) (not= opposite node))
+      (let [hv (gpt/to-vec node (-> handler (update :x + dx) (update :y + dy)))]
+        (if (mth/almost-zero? (gpt/length hv))
+          modifiers
+          (let [len       (gpt/distance node opposite)
+                target    (gpt/subtract node (gpt/scale (gpt/unit hv) len))
+                [ocx ocy] (path.helpers/prefix->coords op-prefix)]
+            (update modifiers op-idx assoc
+                    ocx (- (:x target) (:x opposite))
+                    ocy (- (:y target) (:y opposite))))))
+      modifiers)))
+
 ;; --- Stable node/segment/handler identity
 ;;
 ;; Nodes, segments and handlers in the path editor are identified by their
@@ -322,11 +346,12 @@
   `{:content <sub-content> :selected #{relative-node-indices}}` ready to splice
   as new subpaths. Selected segments (and segments between two selected nodes)
   are copied as fragments shifted by `offset`; every remaining lone selected
-  node is copied as a new subpath that keeps its incoming segment and ends in a
-  single new node shifted by `offset`. `:selected` holds every genuinely new
-  node (all fragment nodes plus each copied node's endpoint) but never a copied
-  segment's attach point, which stays coincident with the original — selecting
-  it would drag the original too (the move pipeline is position-based)."
+  node is copied with all its incident segments: each copy's far end stays
+  attached to the original neighbor and the copies meet at one new node shifted
+  by `offset`. `:selected` holds every genuinely new node (all fragment nodes
+  plus each copied node's meeting points) but never a copy's attach point,
+  which stays coincident with the original — selecting it would drag the
+  original too (the move pipeline is position-based)."
   [content selection offset]
   (let [fragment (path/extract-content content selection)
         fragment (cond-> fragment
@@ -336,33 +361,40 @@
         covered  (fragment-covered-nodes content selection)
         free     (sort (remove covered (get selection :nodes #{})))]
     (reduce (fn [{:keys [sub selected]} node-index]
-              (if-let [ext (path/duplicate-node-content content node-index offset)]
+              (if-let [{ext :content ext-selected :selected}
+                       (path/duplicate-node-content content node-index offset)]
                 (let [start (count sub)]
-                  ;; ext = [move-to(attach) segment(new node)]; only the last
-                  ;; command (the new node) is selectable, the attach point is
-                  ;; not. A lone point is a single move-to that is itself the
-                  ;; new node.
                   {:sub      (into sub ext)
-                   :selected (conj selected (+ start (dec (count ext))))})
+                   :selected (into selected (map #(+ start %)) ext-selected)})
                 {:sub sub :selected selected}))
             {:sub fragment :selected (set (node-indices fragment))}
             free)))
 
 (defn remap-selection
   "Adjust a grouped selection map after the content changed. With the same
-  command layout (equal command count) node and segment indices remain valid
-  and only handlers whose command lost its control points are dropped;
-  otherwise node indices are re-resolved by position and segment/handler
-  selections are cleared."
+  command layout (equal command count) node and segment indices remain valid;
+  handlers whose command lost its control points and segments whose command
+  became a subpath break are dropped. Otherwise node indices are re-resolved
+  by position and segment/handler selections are cleared."
   [selection old-content new-content]
   (let [selection (or selection empty-selection)]
     (if (= (count old-content) (count new-content))
-      (update selection :handlers
-              (fn [handlers]
-                (into #{}
-                      (filter (fn [[index _]]
-                                (= :curve-to (:command (nth new-content index nil)))))
-                      handlers)))
+      (-> selection
+          (update :handlers
+                  (fn [handlers]
+                    (into #{}
+                          (filter (fn [[index _]]
+                                    (= :curve-to (:command (nth new-content index nil)))))
+                          handlers)))
+          ;; a removed segment can keep the command count (its command becomes
+          ;; a subpath-break move-to), so a selected index may stop being a
+          ;; segment
+          (update :segments
+                  (fn [segments]
+                    (into #{}
+                          (remove (fn [index]
+                                    (= :move-to (:command (nth new-content index nil)))))
+                          segments))))
       (assoc empty-selection
              :nodes (remap-selected-nodes (get selection :nodes #{})
                                           old-content

@@ -310,7 +310,7 @@
                    :handlers #{[1 :c2] [2 :c1]}}
         state     (selectable-path-state id content selection)
         event     (path.edition/modify-selected-handlers
-                   id [1 :c2] {} 3 4 true)
+                   id [1 :c2] {} 3 4 :smart)
         state'    (ptk/update event state)
         modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
         content'  (path/apply-content-modifiers content modifiers)]
@@ -463,6 +463,18 @@
                (mapv (juxt :command :params) sub)))
       ;; only the new endpoint (index 1) is selected, not the attach point
       (t/is (= #{1} selected)))
+    ;; an interior node copies every incident segment: both copies end at the
+    ;; single new node (the shifted (10,0) -> (20,10)) and both meeting points
+    ;; are selected, while the far ends stay attached to the original neighbors
+    (let [{:keys [sub selected]}
+          (path.helpers/duplicate-selection-content
+           content {:nodes #{1} :segments #{}} (gpt/point 10 10))]
+      (t/is (= [[:move-to {:x 0 :y 0}]
+                [:line-to {:x 20 :y 10}]
+                [:move-to {:x 20 :y 0}]
+                [:line-to {:x 20 :y 10}]]
+               (mapv (juxt :command :params) sub)))
+      (t/is (= #{1 3} selected)))
     ;; a selected segment is copied as a fragment shifted by the offset, both
     ;; endpoints selectable
     (let [{:keys [sub selected]}
@@ -773,7 +785,7 @@
                    :handlers #{[1 :c1] [2 :c1] [9 :c2]}}
         state     (selectable-path-state id content selection)
         event     (path.edition/modify-selected-handlers
-                   id [2 :c1] {} 3 4 true)
+                   id [2 :c1] {} 3 4 :smart)
         state'    (ptk/update event state)
         modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])]
     (t/is (= {:c1x 3 :c1y 4} (get modifiers 2)))
@@ -835,13 +847,14 @@
   (t/is (path.helpers/handlers-joined? (selectable-path-content) 2 :c1))
   (t/is (not (path.helpers/handlers-joined? (corner-path-content) 2 :c1))))
 
-(t/deftest handler-drag-without-alt-keeps-a-smooth-node-smooth
+(t/deftest handler-drag-smart-keeps-a-smooth-node-smooth
   (let [id        (random-uuid)
         content   (selectable-path-content)
         state     (selectable-path-state id content {:nodes #{} :segments #{}
                                                      :handlers #{[2 :c1]}})
-        ;; alt? false on a joined node preserves the opposite-angle match
-        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 false)
+        ;; the default :smart mode on a joined node preserves the
+        ;; opposite-angle match
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 :smart)
         state'    (ptk/update event state)
         modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
         content'  (path/apply-content-modifiers content modifiers)]
@@ -850,13 +863,14 @@
     (t/is (not= (gpt/point 8 0) (path/get-handler-point content' 1 :c2)))
     (t/is (path.helpers/handlers-joined? content' 2 :c1))))
 
-(t/deftest handler-drag-with-alt-breaks-a-smooth-node
+(t/deftest handler-drag-independent-breaks-a-smooth-node
   (let [id        (random-uuid)
         content   (selectable-path-content)
         state     (selectable-path-state id content {:nodes #{} :segments #{}
                                                      :handlers #{[2 :c1]}})
-        ;; alt? true on a joined node breaks the pair: the opposite stays put
-        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 true)
+        ;; alt (:independent) on a joined node breaks the pair: the opposite
+        ;; stays put
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 0 4 :independent)
         state'    (ptk/update event state)
         modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
         content'  (path/apply-content-modifiers content modifiers)]
@@ -864,21 +878,102 @@
     (t/is (= (gpt/point 8 0) (path/get-handler-point content' 1 :c2)))
     (t/is (not (path.helpers/handlers-joined? content' 2 :c1)))))
 
-(t/deftest handler-drag-with-alt-rejoins-a-corner-node
+(t/deftest handler-drag-mirror-rejoins-a-corner-node
   (let [id        (random-uuid)
         content   (corner-path-content)
         state     (selectable-path-state id content {:nodes #{} :segments #{}
                                                      :handlers #{[2 :c1]}})
-        ;; alt? true on an independent (corner) node re-joins into a mirror:
-        ;; base [2 :c1]=(12,6) dragged by (2,-6) -> (14,0); the opposite
-        ;; [1 :c2]=(8,0) mirrors it around node (10,0) -> (6,0)
-        event     (path.edition/modify-selected-handlers id [2 :c1] {} 2 -6 true)
+        ;; mod (:mirror) on an independent (corner) node re-joins into a full
+        ;; mirror (same length, opposite angle): base [2 :c1]=(12,6) dragged by
+        ;; (2,-6) -> (14,0); the opposite [1 :c2]=(8,0) mirrors it around node
+        ;; (10,0) -> (6,0)
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} 2 -6 :mirror)
         state'    (ptk/update event state)
         modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
         content'  (path/apply-content-modifiers content modifiers)]
     (t/is (= (gpt/point 14 0) (path/get-handler-point content' 2 :c1)))
     (t/is (= (gpt/point 6 0) (path/get-handler-point content' 1 :c2)))
     (t/is (path.helpers/handlers-joined? content' 2 :c1))))
+
+(t/deftest handler-drag-aligned-mirrors-angle-keeping-length
+  (let [id        (random-uuid)
+        content   (corner-path-content)
+        state     (selectable-path-state id content {:nodes #{} :segments #{}
+                                                     :handlers #{}})
+        ;; mod+alt (:aligned) forces the opposite onto the mirrored angle while
+        ;; keeping its own length: [2 :c1]=(12,6) dragged by (-2,-2) -> (10,4);
+        ;; the opposite [1 :c2]=(8,0) (length 2 from node (10,0)) rotates to
+        ;; (10,-2)
+        event     (path.edition/modify-selected-handlers id [2 :c1] {} -2 -2 :aligned)
+        state'    (ptk/update event state)
+        modifiers (get-in state' [:workspace-local :edit-path id :content-modifiers])
+        content'  (path/apply-content-modifiers content modifiers)]
+    (t/is (= (gpt/point 10 4) (path/get-handler-point content' 2 :c1)))
+    (t/is (= (gpt/point 10 -2) (path/get-handler-point content' 1 :c2)))
+    (t/is (path.helpers/handlers-joined? content' 2 :c1))))
+
+(t/deftest remove-handler-collapses-the-clicked-handler
+  (let [id       (random-uuid)
+        content  (selectable-path-content)
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{}
+                                         :handlers #{[1 :c2]}})
+        state'   (ptk/update (path.tools/remove-handler 1 :c2) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; the clicked handler rests on its node (10,0); the others are untouched
+    (t/is (= (gpt/point 10 0) (path/get-handler-point content' 1 :c2)))
+    (t/is (= (gpt/point 2 0) (path/get-handler-point content' 1 :c1)))
+    (t/is (= (gpt/point 12 0) (path/get-handler-point content' 2 :c1)))))
+
+(t/deftest toggle-segment-curve-switches-line-and-curve
+  (let [id        (random-uuid)
+        content   (path/content
+                   [{:command :move-to :params {:x 0 :y 0}}
+                    {:command :line-to :params {:x 30 :y 0}}])
+        state     (selectable-path-state id content path.helpers/empty-selection)
+        state'    (ptk/update (path.tools/toggle-segment-curve 1) state)
+        content'  (get-in state' [:workspace-drawing :object :content])
+        state''   (ptk/update (path.tools/toggle-segment-curve 1) state')
+        content'' (get-in state'' [:workspace-drawing :object :content])]
+    (t/is (= :curve-to (:command (nth content' 1))))
+    (t/is (= (gpt/point 10 0) (path/get-handler-point content' 1 :c1)))
+    (t/is (= (gpt/point 20 0) (path/get-handler-point content' 1 :c2)))
+    (t/is (= :line-to (:command (nth content'' 1))))))
+
+(t/deftest remove-segment-opens-the-path-keeping-nodes
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 0}}
+                   {:command :line-to :params {:x 20 :y 0}}
+                   {:command :line-to :params {:x 30 :y 0}}])
+        state    (selectable-path-state id content
+                                        {:nodes #{} :segments #{2} :handlers #{}})
+        state'   (ptk/update (path.tools/remove-segment 2) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    (t/is (= [[:move-to {:x 0 :y 0}] [:line-to {:x 10 :y 0}]
+              [:move-to {:x 20 :y 0}] [:line-to {:x 30 :y 0}]]
+             (mapv (juxt :command :params) content')))
+    ;; the removed segment's now-stale selection is pruned
+    (t/is (= #{} (get-in state' [:workspace-local :edit-path id :selection :segments])))))
+
+(t/deftest remove-node-with-segments-opens-a-gap
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 0}}
+                   {:command :line-to :params {:x 20 :y 0}}
+                   {:command :line-to :params {:x 30 :y 0}}])
+        state    (selectable-path-state id content path.helpers/empty-selection)
+        emitted  (atom [])
+        _        (->> (ptk/watch (path.tools/remove-node-with-segments 1) state nil)
+                      (rx/subs! #(swap! emitted conj %)))
+        state'   (reduce #(ptk/update %2 %1) state @emitted)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; node (10,0) and both incident segments are gone; the (0,0) start is
+    ;; left dangling and dropped too, the rest of the path survives
+    (t/is (= [[:move-to {:x 20 :y 0}] [:line-to {:x 30 :y 0}]]
+             (mapv (juxt :command :params) content')))))
 
 (t/deftest next-point-preview-is-suppressed-during-a-modifier-drag
   (let [id      (random-uuid)

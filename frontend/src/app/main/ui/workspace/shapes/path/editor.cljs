@@ -20,6 +20,7 @@
    [app.main.ui.hooks :as hooks]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
+   [beicon.v2.core :as rx]
    [goog.events :as events]
    [rumext.v2 :as mf]))
 
@@ -43,7 +44,7 @@
 
 (mf/defc path-point*
   {::mf/private true}
-  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-start-path is-last is-new is-curve]}]
+  [{:keys [index position zoom edit-mode is-hover is-selected is-preview is-new]}]
   (let [{:keys [x y]} position
 
         is-draw (= edit-mode :draw)
@@ -78,26 +79,14 @@
             (if (and is-new (some? (meta position)))
               (st/emit! (drp/create-node-at-position (meta position)))
               (let [is-shift (kbd/shift? event)
+                    is-alt   (kbd/alt? event)
                     is-mod   (kbd/mod? event)]
                 (cond
-                  is-last
-                  (st/emit! (drp/reset-last-handler))
-
-                  (and is-move is-mod (not is-curve))
-                  (st/emit! (drp/make-curve position))
-
-                  (and is-move is-mod is-curve)
-                  (st/emit! (drp/make-corner position))
-
                   is-move
-                  ;; If we're dragging a selected item we don't change the selection
-                  (st/emit! (drp/start-move-path-point index is-shift (kbd/alt? event)))
+                  (st/emit! (drp/start-move-path-point index is-shift is-alt is-mod))
 
-                  (and is-draw is-start-path)
-                  (st/emit! (drp/start-path-from-point position))
-
-                  (and is-draw (not is-start-path))
-                  (st/emit! (drp/close-path-drag-start position)))))))]
+                  is-draw
+                  (st/emit! (drp/on-draw-node-pointer-down index position is-alt is-mod)))))))]
 
     [:g.path-point
      [:circle.path-point
@@ -165,7 +154,9 @@
 
              (st/emit! (drp/start-move-handler index
                                                prefix
-                                               (kbd/shift? event))))))]
+                                               (kbd/shift? event)
+                                               (kbd/alt? event)
+                                               (kbd/mod? event))))))]
 
     [:g.handler {:pointer-events (if ^boolean is-interactive "visible" "none")}
      [:line
@@ -221,7 +212,7 @@
 
 (mf/defc path-segment*
   {::mf/private true}
-  [{:keys [entry zoom is-interactive is-selected is-hover]}]
+  [{:keys [entry zoom edit-mode is-interactive is-selected is-hover]}]
   (let [index    (:index entry)
         content  (mf/with-memo [entry] (segment-content entry))
         is-active (or ^boolean is-selected ^boolean is-hover)
@@ -235,12 +226,19 @@
                     (st/emit! (drp/path-segment-leave index))))
         on-pointer-down
         (mf/use-fn
-         (mf/deps index is-interactive)
+         (mf/deps index is-interactive edit-mode)
          (fn [event]
            (when (and ^boolean is-interactive (dom/left-mouse? event))
              (dom/stop-propagation event)
              (dom/prevent-default event)
-             (st/emit! (drp/start-move-path-segment index (kbd/shift? event) (kbd/alt? event))))))]
+             (if (= edit-mode :draw)
+               (st/emit! (drp/on-draw-segment-pointer-down index
+                                                           (kbd/alt? event)
+                                                           (kbd/mod? event)))
+               (st/emit! (drp/start-move-path-segment index
+                                                      (kbd/shift? event)
+                                                      (kbd/alt? event)
+                                                      (kbd/mod? event)))))))]
     [:g.path-segment {:pointer-events (if ^boolean is-interactive "visible" "none")}
      (when ^boolean is-active
        [:path {:d (.toString content)
@@ -331,26 +329,18 @@
                 prev-handler
                 preview
                 content-modifiers
-                last-point
                 selection
                 moving-nodes
                 moving-handler
                 hover
-                snap-toggled
-                add-nodes]}
+                snap-toggled]}
         state
 
-        ;; In move mode, hovering a segment always previews the node that a
-        ;; click would insert (feature 16); the preview + click-to-insert work
-        ;; regardless of the add-nodes toggle.
         move-mode?
         (= edit-mode :move)
 
-        ;; The add-nodes toggle (a sub-state of move mode): while active, segment
-        ;; select/drag is suppressed and the preview node itself is the click
-        ;; target, so the whole path becomes a pure node-insertion surface.
-        adding-nodes?
-        (and ^boolean move-mode? ^boolean add-nodes)
+        draw-mode?
+        (= edit-mode :draw)
 
         hover-point
         (mf/use-state nil)
@@ -400,9 +390,6 @@
         (mf/with-memo [content]
           (path/get-handlers content))
 
-        is-path-start
-        (not (some? last-point))
-
         show-snap?
         (and ^boolean snap-toggled
              (or (some? drag-handler)
@@ -418,17 +405,20 @@
 
     ;; In move mode, preview the node that a click would insert: only near a
     ;; segment's exact middle by default, or anywhere on the path while the
-    ;; add-nodes toggle is on. When a click there would only select, no preview.
+    ;; platform modifier is held. When a click there would only select, no
+    ;; preview. Keyed on the live modifier so pressing/releasing it updates
+    ;; the preview without moving the pointer.
     (hooks/use-stream
-     ms/mouse-position
-     (mf/deps base-content zoom move-mode? adding-nodes?)
-     (fn [position]
-       (if ^boolean move-mode?
+     (mf/with-memo []
+       (rx/combine-latest ms/mouse-position ms/keyboard-mod))
+     (mf/deps base-content zoom move-mode?)
+     (fn [[position mod?]]
+       (if (and ^boolean move-mode? (gpt/point? position))
          (reset! hover-point
                  (dwp.helpers/insertion-point
                   base-content position
                   (/ dwp.helpers/segment-insert-threshold zoom)
-                  adding-nodes?))
+                  (boolean mod?)))
          (reset! hover-point nil))))
 
     [:g.path-editor {:ref editor-ref}
@@ -441,7 +431,8 @@
         {:key (dm/str "segment-" index)
          :entry entry
          :zoom zoom
-         :is-interactive ^boolean move-mode?
+         :edit-mode edit-mode
+         :is-interactive (or ^boolean move-mode? ^boolean draw-mode?)
          :is-selected (contains? selected-segments index)
          :is-hover (contains? hover-segments index)}])
      (when (and preview (not drag-handler))
@@ -457,7 +448,6 @@
         [:> path-point* {:position @hover-point
                          :edit-mode edit-mode
                          :is-new true
-                         :is-start-path is-path-start
                          :zoom zoom}]])
 
      (when (and drag-handler last-p)
@@ -484,13 +474,7 @@
              (contains? selected-nodes index)
 
              point-hover?
-             (contains? hover-nodes index)
-
-             is-last
-             (= last-point position)
-
-             is-curve
-             (boolean position-handlers)]
+             (contains? hover-nodes index)]
 
          [:g.path-node {:key (dm/str "node-" index)}
           ;; Placed-node handlers stay interactive in draw mode too, so their
@@ -520,10 +504,7 @@
                            :zoom zoom
                            :edit-mode edit-mode
                            :is-selected point-selected?
-                           :is-hover point-hover?
-                           :is-last is-last
-                           :is-start-path is-path-start
-                           :is-curve is-curve}]]))
+                           :is-hover point-hover?}]]))
 
      (when (and prev-handler last-p)
        [:g.prev-handler {:pointer-events "none"}

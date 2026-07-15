@@ -306,41 +306,42 @@
     {:command :line-to :params {:x fx :y fy}}))
 
 (defn duplicate-node-content
-  "Sub-content (a single new subpath) that duplicates the node at the given
-  content command `index`. A copy of the node's incoming segment as a new
-  subpath that starts attached to the node's *predecessor* (so the duplicate
-  keeps its line coming from the same place) and ends in one new node shifted by
-  `node-offset` (its only genuinely new point). A subpath start has no incoming
-  segment, so its outgoing segment is copied reversed instead — the duplicate
-  then attaches at the *successor* and its new node sits on the start node's
-  side. A lone point (a subpath with only a move-to) is copied as an offset
-  point. Returns nil only when the index resolves to nothing."
+  "Sub-content that duplicates the node at the given content command `index`:
+  every segment incident to the node is copied as its own new subpath whose far
+  end stays attached to the original neighbor node and whose near end is the
+  new node, shifted by `node-offset`, where all the copies meet (an outgoing
+  segment is copied reversed so it also ends at the new node). A lone point (a
+  subpath with only a move-to) is copied as an offset point. Returns
+  `{:content <commands> :selected #{relative indices of the new-node
+  commands}}`, or nil when the index resolves to nothing."
   [content index node-offset]
   (let [content  (impl/path-data content)
         entries  (segment-entries content)
-        incoming (d/seek #(= index (:to-index %)) entries)
-        outgoing (d/seek #(= index (:from-index %)) entries)]
-    (cond
-      (some? incoming)
-      (let [{:keys [from]} incoming
-            start {:command :move-to :params {:x (:x from) :y (:y from)}}
-            end   (cond-> (segment->end incoming)
-                    (some? node-offset) (move-segment-end node-offset))]
-        [start end])
-
-      (some? outgoing)
-      (let [{:keys [from to segment]} outgoing
-            start {:command :move-to :params {:x (:x to) :y (:y to)}}
-            end   (cond-> (reverse-segment segment from)
-                    (some? node-offset) (move-segment-end node-offset))]
-        [start end])
-
-      :else
+        incident (filterv #(or (= index (:to-index %))
+                               (= index (:from-index %)))
+                          entries)]
+    (if (seq incident)
+      (reduce (fn [{:keys [content selected]} {:keys [from to to-index segment] :as entry}]
+                (let [incoming? (= index to-index)
+                      start     (if incoming? from to)
+                      end       (if incoming?
+                                  (segment->end entry)
+                                  (reverse-segment segment from))
+                      end       (cond-> end
+                                  (some? node-offset) (move-segment-end node-offset))]
+                  {:content  (conj content
+                                   {:command :move-to
+                                    :params {:x (:x start) :y (:y start)}}
+                                   end)
+                   :selected (conj selected (inc (count content)))}))
+              {:content [] :selected #{}}
+              incident)
       (when-let [{:keys [x y]} (:params (nth content index nil))]
-        [{:command :move-to
-          :params (if (some? node-offset)
-                    {:x (+ x (:x node-offset)) :y (+ y (:y node-offset))}
-                    {:x x :y y})}]))))
+        {:content [{:command :move-to
+                    :params (if (some? node-offset)
+                              {:x (+ x (:x node-offset)) :y (+ y (:y node-offset))}
+                              {:x x :y y})}]
+         :selected #{0}}))))
 
 (defn calc-selrect
   "Calculate selrect from a content. The content can be in a PathData
@@ -442,6 +443,34 @@
   [content points value]
   (let [content (impl/path-data content)]
     (segment/split-segments content points value)))
+
+(defn is-curve-point?
+  "True when the node at the given position has at least one non-collapsed
+  handler."
+  [content point]
+  (let [content (impl/path-data content)]
+    (boolean (segment/is-curve? content point))))
+
+(defn collapse-handler
+  "Collapses the given handler onto its node; a curve whose both control
+  points become degenerate is stored as a plain line-to."
+  [content index prefix]
+  (let [content (impl/path-data content)]
+    (segment/collapse-handler content index prefix)))
+
+(defn toggle-segment-curve
+  "Toggles the segment at the given index between a straight line and a
+  curve with default handles."
+  [content index]
+  (let [content (impl/path-data content)]
+    (segment/toggle-segment-curve content index)))
+
+(defn remove-segments
+  "Removes the segment commands at the given indices, opening their subpaths
+  in place and dropping subpaths left without segments."
+  [content indices]
+  (let [content (impl/path-data content)]
+    (segment/remove-segments content indices)))
 
 (defn remove-nodes
   "Removes the given points from content, reconstructing paths as needed."

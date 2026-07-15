@@ -25,7 +25,9 @@
    [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.state :as st]
    [app.main.data.workspace.path.streams :as streams]
+   [app.main.data.workspace.path.tools :as tools]
    [app.main.data.workspace.path.undo :as undo]
+   [app.main.streams :as ms]
    [app.util.mouse :as mse]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -496,6 +498,103 @@
     (update [_ state]
       (let [id (st/get-path-id state)]
         (assoc-in state [:workspace-local :edit-path id :prev-handler] nil)))))
+
+(defn on-draw-node-pointer-down
+  "Draw-mode node pointer-down dispatcher. The action is decided from the
+  modifiers captured on the DOM event; the mod/alt operations edit the path in
+  place and never touch the line in progress, except that removing the pending
+  segment's own origin also clears the pending start. Without modifiers a
+  click welds the pending segment onto the node (or makes the node the start
+  of the next segment when nothing is pending)."
+  [index position alt? mod?]
+  (ptk/reify ::on-draw-node-pointer-down
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id         (st/get-path-id state)
+            content    (st/get-path state :content)
+            node-pos   (when (and (some? content)
+                                  (< index (count content))
+                                  (helpers/node? content index))
+                         (helpers/node-position content index))
+            last-point (dm/get-in state [:workspace-local :edit-path id :last-point])
+            pending-origin? (and (some? node-pos) (= last-point node-pos))]
+        (cond
+          (and mod? alt?)
+          (rx/concat
+           (rx/of (tools/remove-node-with-segments index))
+           (if pending-origin?
+             (rx/of (common/cancel-pending-segment))
+             (rx/empty)))
+
+          mod?
+          (streams/drag-stream
+           (rx/of (edition/curve-config-node-drag index))
+           (rx/of (tools/toggle-node-curve index)))
+
+          alt?
+          (if (some? node-pos)
+            (rx/concat
+             (rx/of (tools/remove-node node-pos))
+             (if pending-origin?
+               (rx/of (common/cancel-pending-segment))
+               (rx/empty)))
+            (rx/empty))
+
+          (= last-point position)
+          (rx/of (reset-last-handler))
+
+          (nil? last-point)
+          (rx/of (start-path-from-point position))
+
+          :else
+          (rx/of (close-path-drag-start position)))))))
+
+(def ^:private draw-insert-threshold
+  "Distance (board px, divided by zoom at the call site) within which a
+  draw-mode segment click resolves the exact point to insert; slightly wider
+  than the segment's hit stroke so clicks at its edge still insert."
+  16)
+
+(defn on-draw-segment-pointer-down
+  "Draw-mode segment pointer-down dispatcher. Without modifiers it inserts a
+  node at the click point and welds the pending segment onto it (starting the
+  next segment there when nothing is pending); a drag then shapes the new
+  node's handles. The platform modifier toggles the segment straight/curved on
+  click and bends it on drag; alt (with or without mod) removes the segment.
+  The mod/alt operations never touch the line in progress."
+  [index alt? mod?]
+  (ptk/reify ::on-draw-segment-pointer-down
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id         (st/get-path-id state)
+            zoom       (dm/get-in state [:workspace-local :zoom] 1)
+            content    (st/get-path state :content)
+            position   @ms/mouse-position
+            last-point (dm/get-in state [:workspace-local :edit-path id :last-point])]
+        (cond
+          alt?
+          (rx/of (tools/remove-segment index))
+
+          mod?
+          (let [entry     (d/seek #(= index (:index %)) (helpers/segment-entries content))
+                bendable? (and (some? entry)
+                               (not= :close-path (:command (:segment entry))))]
+            (streams/drag-stream
+             (if bendable?
+               (rx/of (edition/bend-selected-segment index position))
+               (rx/empty))
+             (rx/of (tools/toggle-segment-curve index))))
+
+          :else
+          (let [insert-point (helpers/insertion-point
+                              content position (/ draw-insert-threshold zoom) true)]
+            (if (some? insert-point)
+              (rx/concat
+               (rx/of (edition/create-node-at-position (meta insert-point)))
+               (if (some? last-point)
+                 (rx/of (close-path-drag-start insert-point))
+                 (rx/of (start-path-from-point insert-point))))
+              (rx/empty))))))))
 
 (defn check-changed-content
   []

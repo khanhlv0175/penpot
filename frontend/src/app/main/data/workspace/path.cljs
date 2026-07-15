@@ -20,6 +20,8 @@
 (dm/export drawing/close-path-drag-start)
 (dm/export drawing/change-edit-mode)
 (dm/export drawing/reset-last-handler)
+(dm/export drawing/on-draw-node-pointer-down)
+(dm/export drawing/on-draw-segment-pointer-down)
 
 ;; Edition
 (dm/export edition/start-move-handler)
@@ -56,8 +58,11 @@
 (dm/export tools/join-nodes)
 (dm/export tools/separate-nodes)
 (dm/export tools/toggle-snap)
-(dm/export tools/set-add-nodes)
-(dm/export tools/toggle-add-nodes)
+(dm/export tools/toggle-node-curve)
+(dm/export tools/toggle-segment-curve)
+(dm/export tools/remove-segment)
+(dm/export tools/remove-node-with-segments)
+(dm/export tools/remove-handler)
 (dm/export tools/flip-nodes)
 (dm/export tools/align-nodes)
 (dm/export tools/distribute-nodes)
