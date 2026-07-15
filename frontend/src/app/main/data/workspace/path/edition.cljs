@@ -772,10 +772,28 @@
     (watch [_ state _]
       (let [id                (st/get-path-id state)
             handler-id        [index prefix]
+            content           (st/get-path state :content)
             selected-handlers (dm/get-in state
                                          [:workspace-local :edit-path id :selection :handlers]
                                          #{})
-            selected?         (contains? selected-handlers handler-id)]
+            selected?         (contains? selected-handlers handler-id)
+
+            ;; The stored per-node handler type drives the plain drag so it does
+            ;; not depend on fragile geometry: :independent never touches the
+            ;; opposite (smart would still move it while the pair is collinear),
+            ;; :aligned forces the angle match keeping the opposite's own length,
+            ;; and :mirror forces the exact mirror (guarded to a still-joined pair
+            ;; so a stale entry can't re-mirror a broken corner). No stored type
+            ;; falls back to smart (the group-aware default).
+            node-index        (helpers/handler-node-index index prefix)
+            node-type         (dm/get-in state [:workspace-local :edit-path id :handler-types node-index])
+            plain-mode        (case node-type
+                                :mirror      (if (helpers/handlers-joined? content index prefix)
+                                               :mirror
+                                               :smart)
+                                :aligned     :aligned
+                                :independent :independent
+                                :smart)]
         (cond
           (and mod? alt?)
           (streams/drag-stream
@@ -795,7 +813,7 @@
             (set-drag-cursor "move-move")
             (when-not selected?
               (selection/select-handler index prefix shift?))
-            (drag-selected-handlers handler-id :smart))
+            (drag-selected-handlers handler-id plain-mode))
            (rx/of (selection/select-handler index prefix shift?))))))))
 
 (defn drag-selected-handlers
@@ -883,6 +901,7 @@
                                        {:edit-mode :move
                                         :selection helpers/empty-selection
                                         :hover helpers/empty-selection
+                                        :handler-types {}
                                         :snap-toggled true})]
                            (assoc state :old-content (:content shape))))))))
 

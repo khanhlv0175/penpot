@@ -15,10 +15,13 @@
   transform: translateX(-50%);
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+  // Fixed width so the bar keeps its size as node-op buttons appear/disappear.
+  width: 480px;
   height: deprecated.$s-56;
   padding: deprecated.$s-8 deprecated.$s-16;
   border-radius: deprecated.$s-8;
-  gap: deprecated.$s-16;
+  gap: deprecated.$s-8;
   border: deprecated.$s-2 solid var(--panel-border-color);
   z-index: deprecated.$z-index-3;
   background-color: var(--color-background-primary);
@@ -35,6 +38,71 @@
   margin: 0;
   opacity: deprecated.$op-10;
   transition: opacity 0.3s ease;
+}
+
+// The snap toggle is pinned to the right edge; everything else stays left.
+.snap-group {
+  margin-left: auto;
+}
+
+.separator {
+  flex-shrink: 0;
+  width: deprecated.$s-1;
+  height: deprecated.$s-24;
+  margin: 0 deprecated.$s-4;
+  background-color: var(--panel-border-color);
+}
+
+.handler-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+// Trigger of the handler-behaviour flyout; hosts the corner indicator.
+.handler-trigger {
+  position: relative;
+}
+
+// Bottom-right corner indicator marking the button as a flyout, mirroring the
+// main toolbar's grouped-tool control.
+.flyout-indicator {
+  position: absolute;
+  inset-block-end: deprecated.$s-4;
+  inset-inline-end: deprecated.$s-4;
+  inline-size: deprecated.$s-6;
+  block-size: deprecated.$s-6;
+  stroke: var(--pathbar-icon-color);
+  fill: none;
+  pointer-events: none;
+}
+
+.handler-popover {
+  position: absolute;
+  top: calc(100% + #{deprecated.$s-8});
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  padding: deprecated.$s-4;
+  gap: deprecated.$s-2;
+  border-radius: deprecated.$s-8;
+  border: deprecated.$s-2 solid var(--panel-border-color);
+  background-color: var(--color-background-primary);
+  z-index: deprecated.$z-index-3;
+  // Opens on hover; matches the main toolbar flyout's show/hide transition.
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 80ms ease-out,
+    visibility 80ms linear;
+
+  &.open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
 }
 
 .topbar-btn {

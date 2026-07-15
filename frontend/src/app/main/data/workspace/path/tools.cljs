@@ -6,6 +6,7 @@
 
 (ns app.main.data.workspace.path.tools
   (:require
+   [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.types.path :as path]
    [app.main.data.workspace.edition :as dwe]
@@ -48,7 +49,9 @@
                    (seq new-content)
                    (update-in (st/get-path-location state) path/update-geometry))
                  (update-in [:workspace-local :edit-path id :selection]
-                            #(helpers/remap-selection % old-content new-content))))
+                            #(helpers/remap-selection % old-content new-content))
+                 (update-in [:workspace-local :edit-path id :handler-types]
+                            #(helpers/remap-handler-types % old-content new-content))))
            state)))
 
      ptk/WatchEvent
@@ -73,6 +76,42 @@
     (when point #{point})
     (fn [content points]
       (reduce path/make-curve-point content points)))))
+
+(defn- apply-handler-type-modifiers
+  "Content-modifier map that reshapes the node at anchor `node-index` to `type`
+  in place (zero drag delta): mirror forces the opposite onto the exact mirror,
+  aligned rotates it collinear keeping its length, independent leaves geometry."
+  [content node-index type]
+  (if-let [[idx prefix] (helpers/node-primary-handler content node-index)]
+    (case type
+      :mirror  (helpers/move-handler-modifiers content idx prefix true true true 0 0)
+      :aligned (helpers/align-handler-modifiers content idx prefix 0 0)
+      {})
+    {}))
+
+(defn set-handler-type
+  "Sets the handler behaviour (`:mirror` / `:aligned` / `:independent`) of the
+  selected node(s): reshapes their handlers to match and records the type in the
+  ephemeral edit-path state so it is honoured on later drags and reflected in the
+  top bar."
+  [type]
+  (ptk/reify ::set-handler-type
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (dm/get-in state [:workspace-local :edit-path id :selection])
+            nodes     (helpers/handler-target-nodes content selection)]
+        (if (and (some? content) (seq nodes))
+          (let [modifiers   (reduce (fn [acc node-index]
+                                      (d/deep-merge acc (apply-handler-type-modifiers content node-index type)))
+                                    {} nodes)
+                new-content (path/apply-content-modifiers content modifiers)]
+            (-> (st/set-content state new-content)
+                (update-in (st/get-path-location state) path/update-geometry)
+                (update-in [:workspace-local :edit-path id :handler-types]
+                           (fn [ht] (reduce #(assoc %1 %2 type) (or ht {}) nodes)))))
+          state)))))
 
 (defn add-node []
   (process-path-tool (fn [content points] (path/split-segments content points 0.5))))

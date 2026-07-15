@@ -1105,14 +1105,16 @@ for features 1–3, 8, 10, and 11 is complete.
   feature 33's node-duplication geometry (Ctrl+D included). **The per-cell cursor
   mapping is now also implemented (2026-07-15, user-provided spec — see §15).** Still
   open: the **live by-hand pass** over the whole matrix + cursors.
-- **New batch requested 2026-07-15 — NOT yet implemented (features 35–40, see §16):**
-  mid-segment node creation must beat pixel-grid snap at high zoom (35); `Ctrl+A`
-  select-all-nodes (36); `Shift+Delete` = remove node + adjacent segments / open path
-  (37, reuses `remove-node-with-segments`); selected nodes recoloured to the segment pink
-  (38); paste path nodes **outside** the editor → new path shape, and into another open
-  path editor (39); path-editor top-bar refactor — fixed width, draw/move separator, drop
-  add/remove-node buttons, hide (not disable) unavailable icons (40). Full analysis and
-  file/function pointers in §16.
+- **New batch requested 2026-07-15 (features 35–41, see §16):** **35–39 NOT yet
+  implemented** — mid-segment node creation must beat pixel-grid snap at high zoom (35);
+  `Ctrl+A` select-all-nodes (36); `Shift+Delete` = remove node + adjacent segments / open
+  path (37, reuses `remove-node-with-segments`); selected nodes recoloured to the segment
+  pink (38); paste path nodes **outside** the editor → new path shape, and into another
+  open path editor (39). **40 DONE** (top-bar refactor: fixed 480px width, separators,
+  add/remove-node buttons removed, unavailable node-op icons hidden not disabled). **41
+  DONE** (handler-behavior split button + popover — mirror/aligned/independent — with
+  ephemeral per-node type; geometry REPL-verified; placeholder icons + live pass owed).
+  Full analysis and file/function pointers in §16.
 - **Cursor sizing fix (2026-07-15):** the `draw-add`/`draw-node`/`draw-remove` badge
   cursors rendered the pen smaller than `draw` (their SVGs pack pen+badge into the
   16-unit viewBox at `scale(0.762)` vs `draw`'s `scale(0.941)`). Fixed by rendering the
@@ -1935,9 +1937,26 @@ logic stays in the path namespace. Watch the transit round-trip: path copy uses
 +10/+10 offset) and whether an outside paste should also enter path edition on the new
 shape or just drop it selected. Default suggestion: drop it selected, no auto-edit.
 
-### Feature 40 — path-editor top-bar refactor
+### Feature 40 — path-editor top-bar refactor — DONE 2026-07-15 (uncommitted)
 
-**Requirement:** (1) fixed size for the bar; (2) a vertical separator between the
+Implemented in `ui/workspace/viewport/path_actions.cljs` + `.scss`: removed the
+Add-node/Remove-node buttons (and their `check-enabled` keys/handlers and the unused
+`add-icon`/`remove-icon`); node-op buttons (merge/join/separate/make-corner/make-curve)
+are now **conditionally rendered** via a `topbar-button*` component wrapped in `when`
+(unavailable → removed, not disabled); groups are separated by a `separator` element
+(`.separator` = 1px vertical rule) rendered between the mode group, the (collapsible)
+structural + shape groups, and the always-on snap toggle; the bar has a **fixed width**
+(`.sub-actions { width: 480px; justify-content: center; }`) so it no longer reflows as
+buttons appear/disappear (structural/shape groups + their in-between separator collapse
+when empty). Draw/move and snap stay always visible. `clj-kondo` 0/0, build `:ok`.
+The snap toggle's icon was swapped 2026-07-16 from the placeholder `:snap-nodes` glyph to a
+new dedicated `resources/images/icons/snap.svg` (user-drawn, normalized to the 16×16 standard;
+def renamed `snap-nodes-icon` → `snap-icon`, xref key `:snap`). The snap action/shortcut/i18n
+key stays `snap-nodes` — only the glyph changed.
+**Owed:** the live look (esp. mid-creation per feature 15, and the 480px width once the
+feature-41 handler button is added — bump it then); by-hand pass.
+
+Original requirement, for reference: (1) fixed size for the bar; (2) a vertical separator between the
 draw/move icons and the rest; (3) remove the **add-node** and **remove-node** buttons;
 (4) the remaining node-op icons should be **removed when unavailable** rather than shown
 disabled (draw/move/snap stay always visible).
@@ -1969,9 +1988,143 @@ same bar during path *creation* (buttons mostly disabled/empty then) — verify 
 conditional-render + fixed-width still looks right mid-draw (empty groups collapse but the
 bar keeps its width).
 
+### Feature 41 — handler-behavior button (mirror / aligned / independent) — DONE 2026-07-15 (uncommitted, ephemeral / Option B)
+
+**Implemented** with ephemeral per-node handler-type state (user chose session-scoped).
+Files:
+- `data/workspace/path/helpers.cljs`: `handler-node-index`, `node-primary-handler`,
+  `handlers-equal-length?`, `derive-handler-type` (:mirror = joined+equal, :aligned =
+  joined+unequal, else :independent), `remap-handler-types` (keep on same command count,
+  drop on structural change).
+- `data/workspace/path/tools.cljs`: `set-handler-type` — for each selected node
+  (`selected-node-indices`) reshapes handlers in place via zero-delta
+  `move-handler-modifiers …rejoin?=true` (mirror) / `align-handler-modifiers` (aligned) /
+  `{}` (independent), applies through `path/apply-content-modifiers` + `update-geometry`,
+  and records `{node-index → type}` under `[:workspace-local :edit-path id :handler-types]`.
+  `process-path-tool` now also `remap-handler-types` (clears on structural change).
+- `data/workspace/path/edition.cljs`: `start-path-edit` seeds `:handler-types {}`;
+  `start-move-handler`'s plain branch maps the dragged handler's node's stored type
+  **directly** to the drag mode — `:independent`→`:independent`, `:aligned`→`:aligned`,
+  `:mirror`→`:mirror` (the last guarded to a still-`handlers-joined?` pair so a stale entry
+  can't re-mirror a broken corner), no stored type → `:smart`. (An earlier version fell
+  back to `:smart` for aligned/independent; that was a bug — `:smart` keeps a *collinear*
+  pair joined, so `:independent` failed to detach the opposite handle. REPL-verified: a
+  `:independent` drag now leaves the opposite fixed.)
+- `path.cljs`: exports `set-handler-type`.
+- UI `ui/workspace/viewport/path_actions.cljs` + `.scss`: `handler-type-menu*` split
+  button (icon = active type) opening a flyout with the three modes; shown in move mode
+  when a node **or handler** is selected; active type = stored, else `derive-handler-type`.
+  **Corner nodes are excluded (2026-07-16):** a corner node has no handler behaviour to
+  configure, so `handler-visible?` now requires at least one target node that is a curve
+  point (`handler-node` = the first such node, which also drives the active-type readout);
+  a pure corner-node selection hides the control. The test is `segment/is-curve?` (a handler
+  actually offset from the node — the same predicate the make-corner/curve buttons use), NOT
+  `node-primary-handler`: `make-corner-point` collapses the handles onto the node but leaves
+  the command as `:curve-to` (only `remove-line-curves` demotes to `line-to`, and only when
+  *both* sides collapse), so a made-corner node still has a curve-to command with coincident
+  handles — `is-curve?` returns false for it, `node-primary-handler` did not (JVM-verified).
+  **Flyout reworked 2026-07-16 to mirror the main toolbar's grouped path/line tool**
+  (`top_toolbar/group-tool*`): opens **on hover** (`on-pointer-enter`/`-leave` + 350ms
+  open/close timers via `app.util.timers`/`cancel-timer!`, disposed in a `with-effect`), and
+  the trigger carries the same **bottom-right corner flyout indicator** (the DS `icon-button*`
+  `.flyout-indicator` glyph, restyled locally `stroke: var(--pathbar-icon-color)`). The popover
+  is always in the DOM and animates via `opacity`/`visibility`/`pointer-events` on an `.open`
+  class (80ms, like the toolbar flyout). Trigger **click applies the active type** (analogue of
+  the toolbar main button selecting the default tool); item click selects+closes. Indicator
+  placement (6px, 4px insets, bottom-right) and open/closed popover visibility verified live
+  against the real compiled CSS.
+  The control targets nodes, so a handler selection resolves to its owning node via
+  `helpers/handler-target-nodes` (`selected-node-indices` ∪ `handler-node-index` of each
+  selected handler) — used by both the button visibility/indicator and `set-handler-type`.
+  The bar is left-aligned with the snap toggle pinned right (`.snap-group { margin-left: auto }`).
+  **Real handle glyphs landed 2026-07-16** (user-drawn paths, exported + normalized to the
+  16×16 icon standard): `resources/images/icons/handlers-equal.svg` (:mirror = equal-length
+  collinear handles), `handlers-mirror.svg` (:aligned = mirrored angle / independent length),
+  `handlers-independent.svg` (:independent = corner). Mapping is now **by geometry** (the
+  glyph matches what the mode does): an initial by-name wiring was **swapped 2026-07-16** on
+  the user's request so the equal-length mode shows the equal-length glyph. Registered in
+  `ui/icons.cljs`; the three `handler-*-icon` defs in `path_actions.cljs` point at them.
+  i18n keys `workspace.path.actions.handler-*` in `en.po`.
+
+**Verified (REPL, geometry):** node↔handler index mapping, `derive-handler-type`, and the
+mirror/aligned reshape (mirror equalises the two handle lengths; aligned keeps them). **Owed:**
+live by-hand pass (hover-open flyout + corner indicator, mirror surviving a drag,
+multi-select); frontend focused-suite cases (`set-handler-type`, `derive-handler-type`, `remap-handler-types`);
+the real handle icons; and bump the feature-40 bar width (480px) now that this group exists.
+**Limitations (ephemeral):** types are lost on editor exit (re-derived on reopen) and dropped
+on structural edits (make-corner/curve/merge/split/…); split/paste that shift indices without
+changing count are an edge (mitigated for drags by the still-joined guard).
+
+**IMPORTANT rumext gotcha found here (applies to feature 40 too):** rumext v2 compiles
+hiccup at macro-expansion, so **runtime-built hiccup does not render** — `(into [:div …] …)`
+as a component root/child and let-bound `[:> comp …]` vectors + `interpose` silently fail
+(the build still says `:ok`). The render was rewritten to **all-literal hiccup with inline
+`(when … [:div …])`** children and inline `[:div {:class (stl/css :separator)}]` dividers
+(no `into`, no `interpose`, no let-bound hiccup, no `def`'d hiccup). Use `mf/html` if a
+runtime structure is ever unavoidable.
+
+**Requirement (added 2026-07-15, with the feature-40 refactor):** a new top-bar button
+(a split/popover control) sets the **handler behaviour of the selected node(s)**, with
+three options shown in a popover (matching the reference mock — three handle glyphs):
+- **left = joined, equal size** → `:mirror` (handles collinear through the node, equal
+  length);
+- **centre = joined, independent size** → `:aligned` (collinear, each keeps its own
+  length);
+- **right = independent** → `:independent` (corner; handles move independently).
+The button reflects the current node's type. The user note: *"probably this will require
+saving the state of the handler types instead of relying on their position."*
+
+**Reuse — the three modes already exist as drag behaviours (feature 34/§14):**
+`edition/modify-selected-handlers` `mode` = `:smart|:mirror|:aligned|:independent`;
+`helpers/move-handler-modifiers` (rejoin arity = mirror), `helpers/align-handler-modifiers`
+(aligned), `helpers/handlers-joined?` (collinear ~180°). `start-move-handler` picks the
+mode from ctrl/alt today.
+
+**Why geometry alone is insufficient (the crux):** `handlers-joined?` is a *binary*
+collinearity test, so mirror and aligned are indistinguishable by angle (both ~180°;
+they differ only in length), and a corner that is *momentarily* collinear reads as
+joined. So an "independent" click has no geometric effect to persist, `:smart` drags
+degrade a mirror node to aligned (smart keeps the opposite's own length), and the active
+indicator can't reliably tell mirror from aligned. Hence the user's "save the state".
+
+**Design fork — where the per-node handler type is stored (NEEDS A DECISION):**
+- **A. Derive from geometry, no storage.** Button applies mirror/aligned as an immediate
+  geometry op; indicator = derived (equal-len collinear→mirror, unequal→aligned,
+  else independent). Cheapest, but `:independent` click is a no-op, mirror doesn't
+  survive a later drag, and the indicator is fragile. Does *not* satisfy "save the state".
+- **B. Ephemeral edit-state (recommended).** Store `{node → :mirror|:aligned|:independent}`
+  under `[:workspace-local :edit-path id :handler-types]`; init empty in
+  `edition/start-path-edit`; remap on structural edits (alongside `helpers/remap-selection`);
+  the click both applies the geometry AND records the type; `start-move-handler` reads the
+  stored type as the default drag mode (ctrl/alt still override); the indicator reads it
+  (fallback to derived). Full UX within an editing session, **no data-model change**; lost
+  on exit (reopening re-derives). Medium size, self-contained in the path data layer.
+  Key detail: key the map by the node **anchor** and resolve a handler `[index prefix]` →
+  its node via `path/handler->node` / `path/opposite-index` (mind index shifts).
+- **C. Persist on the shape.** Store the handler type in the path data model so it
+  survives save/reload. Requires `common/types/path` schema + validation +
+  render-wasm + a file migration (see `common/data-model-change-checklist`,
+  `file-change-validation-migration-subtleties`, `render-wasm/*` mems). Largest/riskiest.
+
+**Recommendation: B** (ephemeral) unless cross-session persistence is explicitly needed
+(then C). Regardless of storage, the **UI** is the same: a new `path_actions*` group
+before the snap toggle — a button whose icon = the active mode, opening a small popover
+with the three mode buttons; on select emit a new `tools`/`edition` event
+`set-handler-type` (applies geometry via the existing mirror/align helpers with a zero
+drag delta to reshape in place, and — B/C — records the type). Add the three handle icons
+(`resources/images/icons/…`, register in the icon set) and an i18n key per mode. The bar's
+fixed width (feature 40, 480px) must grow to fit the new group.
+
+**Immediate-apply geometry (for the click):** mirror = `move-handler-modifiers … rejoin?=true`
+with dx=dy=0 on one handler of the node (forces the opposite onto the exact mirror);
+aligned = `align-handler-modifiers` dx=dy=0 (opposite rotated collinear, keeps its length);
+independent = no geometry change (type-only) — which is exactly why A can't express it.
+Apply through `process-path-tool`/`set-content` + `update-geometry` like the other tools.
+
 **Verification for the batch:** `clj-kondo` 0/0 + `cljfmt` on every touched ns; frontend
 focused suite green (add cases: `select-all-nodes`, the shift+delete binding →
-`remove-node-with-segments`, the outside-editor paste building a `:path` shape); common
-suite if any `types/path` fn changes. Then the live by-hand pass (high-zoom insert for
-35, Ctrl+A/Shift+Del, node colour, outside/cross-editor paste, toolbar look) — automation
+`remove-node-with-segments`, the outside-editor paste building a `:path` shape,
+`set-handler-type` applies the mode + records the type); common suite if any `types/path`
+fn changes. Then the live by-hand pass (high-zoom insert for 35, Ctrl+A/Shift+Del, node
+colour, outside/cross-editor paste, toolbar look + handler-mode popover) — automation
 can't enter edit mode this session (§7).

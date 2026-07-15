@@ -8559,6 +8559,22 @@ msgstr "To corner (%s)"
 msgid "workspace.path.actions.make-curve"
 msgstr "To curve (%s)"
 
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.handler-type"
+msgstr "Handler behaviour"
+
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.handler-mirror"
+msgstr "Mirrored (equal length)"
+
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.handler-aligned"
+msgstr "Mirrored angle (independent length)"
+
+#: src/app/main/ui/workspace/viewport/path_actions.cljs
+msgid "workspace.path.actions.handler-independent"
+msgstr "Independent"
+
 #: src/app/main/ui/workspace/viewport/path_actions.cljs:181
 msgid "workspace.path.actions.merge-nodes"
 msgstr "Merge nodes (%s)"

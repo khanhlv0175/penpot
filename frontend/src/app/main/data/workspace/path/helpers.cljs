@@ -137,6 +137,65 @@
                     ocy (- (:y target) (:y opposite))))))
       modifiers)))
 
+;; --- Per-node handler type (mirror / aligned / independent)
+
+(defn handler-node-index
+  "The anchor command index of the node a handler `[index prefix]` belongs to
+  (`:c1` of command i departs node i-1, `:c2` of command i arrives at node i)."
+  [index prefix]
+  (if (= prefix :c1) (dec index) index))
+
+(defn node-primary-handler
+  "A `[index prefix]` curve handler incident to the node at anchor command
+  `node-index` (prefers the incoming `:c2`), or nil when the node has none."
+  [content node-index]
+  (let [n       (count content)
+        out-idx (inc node-index)]
+    (cond
+      (and (>= node-index 0) (< node-index n)
+           (= :curve-to (:command (nth content node-index nil))))
+      [node-index :c2]
+
+      (and (< out-idx n)
+           (= :curve-to (:command (nth content out-idx nil))))
+      [out-idx :c1]
+
+      :else nil)))
+
+(defn handlers-equal-length?
+  "True when a node's two handlers are the same distance from the node."
+  [content index prefix]
+  (let [[op-idx op-prefix] (path/opposite-index content index prefix)
+        node     (path/handler->node content index prefix)
+        handler  (path/get-handler-point content index prefix)
+        opposite (when op-idx (path/get-handler-point content op-idx op-prefix))]
+    (boolean
+     (and (some? handler) (some? opposite)
+          (mth/almost-zero? (- (gpt/distance node handler)
+                               (gpt/distance node opposite)))))))
+
+(defn derive-handler-type
+  "The handler type of the node at anchor `node-index` inferred from geometry:
+  `:mirror` (joined + equal length), `:aligned` (joined, unequal length), or
+  `:independent` (a corner, or a node without a curve handler pair)."
+  [content node-index]
+  (if-let [[idx prefix] (node-primary-handler content node-index)]
+    (cond
+      (not (handlers-joined? content idx prefix)) :independent
+      (handlers-equal-length? content idx prefix) :mirror
+      :else                                       :aligned)
+    :independent))
+
+(defn remap-handler-types
+  "Remap the ephemeral per-node handler-type map after a content change. Node
+  indices are stable while the command count is unchanged (moves/handler drags),
+  so the map is kept as-is; a structural change (different count) drops it, since
+  the node handler configuration itself changed."
+  [handler-types old-content new-content]
+  (if (= (count old-content) (count new-content))
+    (or handler-types {})
+    {}))
+
 ;; --- Stable node/segment/handler identity
 ;;
 ;; Nodes, segments and handlers in the path editor are identified by their
@@ -212,6 +271,15 @@
   [content selection]
   (into (get selection :nodes #{})
         (segment-node-indices content (get selection :segments #{}))))
+
+(defn handler-target-nodes
+  "The node anchor indices a handler-type change targets: the selected nodes
+  (and segment endpoints) plus the owning nodes of any selected handlers, so the
+  behaviour can be set from a handler selection too."
+  [content selection]
+  (into (selected-node-indices content selection)
+        (map (fn [[idx prefix]] (handler-node-index idx prefix)))
+        (get selection :handlers #{})))
 
 (def segment-insert-threshold
   "Distance (board px, divided by zoom at the call site) from a segment's exact
