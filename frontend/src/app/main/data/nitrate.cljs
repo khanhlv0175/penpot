@@ -6,6 +6,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.common :as dcm]
+   [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.notifications :as ntf]
    [app.main.data.team :as dt]
@@ -68,8 +69,11 @@
      (st/emit! (rt/nav-raw :href "/admin-console/")))))
 
 (defn go-to-nitrate-ac-create-org
-  []
-  (st/emit! (rt/nav-raw :href "/admin-console/?action=create-org")))
+  [event-origin]
+  (let [href (dom/append-query-param "/admin-console/?action=create-org"
+                                     :origin
+                                     event-origin)]
+    (st/emit! (rt/nav-raw :href href))))
 
 (defn can-send-invitations?
   [{:keys [organization profile-id team-permissions]}]
@@ -104,7 +108,7 @@
      :cancel-callback       (build nitrate-checkout-cancelled-token)}))
 
 (defn go-to-buy-nitrate-license
-  [subscription base-url]
+  [subscription base-url event-origin subscription-mode]
   (let [{:keys [success-callback error-callback finish-error-callback cancel-callback]}
         (build-nitrate-callback-urls base-url)
         params {:subscription subscription
@@ -112,8 +116,19 @@
                 :error_callback error-callback
                 :finish_error_callback finish-error-callback
                 :cancel_callback cancel-callback}
-        href   (dm/str "/admin-console/licenses/start?" (u/map->query-string params))]
-    (st/emit! (rt/nav-raw :href href))))
+        href   (dm/str "/admin-console/licenses/start?" (u/map->query-string params))
+        event  (ev/event {::ev/name "TEMP_start-nitrate-checkout"
+                          ::ev/origin event-origin
+                          :product "nitrate:enterprise"
+                          :billing-period subscription
+                          :subscription-mode subscription-mode})]
+    (->> st/stream
+         (rx/filter (ptk/type? ::ev/chunk-persisted))
+         (rx/take 1)
+         (rx/timeout 2000 (rx/of :timeout))
+         (rx/subs! (fn [_]
+                     (st/emit! (rt/nav-raw :href href)))))
+    (st/emit! event (ptk/data-event ::ev/force-persist {}))))
 
 (defn fetch-connectivity
   []

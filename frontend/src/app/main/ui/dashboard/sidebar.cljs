@@ -316,7 +316,8 @@
          (mf/deps profile)
          (fn []
            (if (dnt/is-valid-license? profile)
-             (dnt/go-to-nitrate-ac-create-org)
+             (dnt/go-to-nitrate-ac-create-org
+              "dashboard:organization_switcher")
              (st/emit! (dnt/show-nitrate-popup :nitrate-form)))))
 
         on-go-to-cc-click
@@ -756,7 +757,8 @@
          (mf/deps profile)
          (fn []
            (if (dnt/is-valid-license? profile)
-             (dnt/go-to-nitrate-ac-create-org)
+             (dnt/go-to-nitrate-ac-create-org
+              "dashboard:organization_switcher")
              (st/emit! (dnt/show-nitrate-popup :nitrate-form)))))]
     (if show-dropdown?
       [:div {:class (stl/css :sidebar-org-switch)}
