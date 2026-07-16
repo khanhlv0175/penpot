@@ -480,7 +480,7 @@
              (st/emit! (dnt/show-nitrate-popup
                         :nitrate-dialog
                         {:nitrate-license nitrate-license
-                         :event-origin "settings:plan_confirmation_modal"}))
+                         :event-origin "settings:plan-confirmation-modal"}))
              (st/emit!
               (modal/show :management-dialog
                           {:subscription-type subscription-type

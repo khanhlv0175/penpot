@@ -117,7 +117,7 @@
                 :finish_error_callback finish-error-callback
                 :cancel_callback cancel-callback}
         href   (dm/str "/admin-console/licenses/start?" (u/map->query-string params))
-        event  (ev/event {::ev/name "TEMP_start-nitrate-checkout"
+        event  (ev/event {::ev/name "TEMP-start-nitrate-checkout"
                           ::ev/origin event-origin
                           :product "nitrate:enterprise"
                           :billing-period subscription

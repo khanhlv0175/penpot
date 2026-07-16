@@ -171,7 +171,7 @@
         handle-go-to-cc
         (mf/use-fn
          #(dnt/go-to-nitrate-ac-create-org
-           "dashboard:first_organization_promotional_banner"))
+           "dashboard:first-organization-promotional-banner"))
 
         handle-open-renew-modal
         (mf/use-fn #(st/emit! (modal/show :nitrate-code-activation {:renew? true})))]

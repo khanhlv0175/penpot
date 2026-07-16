@@ -32,7 +32,7 @@
            (dnt/go-to-buy-nitrate-license
             "monthly"
             dnt/go-to-ac-url
-            "dashboard:plan_confirmation_modal"
+            "dashboard:plan-confirmation-modal"
             (if (:subscription profile) "paid" "trial"))))
 
         on-activate-click
