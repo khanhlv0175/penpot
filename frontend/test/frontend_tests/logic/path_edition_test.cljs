@@ -448,6 +448,37 @@
     ;; opposite (c1 of cmd2) mirrors it about the node (10,0): 2*10-6=14, 2*0-(-2)=2
     (t/is (= (gpt/point 14 2) (path/get-handler-point content' 2 :c1)))))
 
+(t/deftest change-to-draw-mode-starts-a-line-from-the-selected-node
+  (let [id      (random-uuid)
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :line-to :params {:x 10 :y 0}}
+                  {:command :line-to :params {:x 20 :y 0}}])]
+    ;; a middle node: opens a new subpath (move-to) at the node and makes it the
+    ;; pending origin, so the next click draws a line from it
+    (let [state    (selectable-path-state id content
+                                          {:nodes #{1} :segments #{} :handlers #{}})
+          state'   (ptk/update (path.drawing/change-edit-mode :draw) state)
+          content' (get-in state' [:workspace-drawing :object :content])]
+      (t/is (= (gpt/point 10 0)
+               (get-in state' [:workspace-local :edit-path id :last-point])))
+      (t/is (= 4 (count content')))
+      (t/is (= :move-to (:command (nth content' 3))))
+      (t/is (= (gpt/point 10 0) (path.helpers/node-position content' 3))))
+    ;; the drawing tip: just becomes the pending origin (extends), no new subpath
+    (let [state    (selectable-path-state id content
+                                          {:nodes #{2} :segments #{} :handlers #{}})
+          state'   (ptk/update (path.drawing/change-edit-mode :draw) state)
+          content' (get-in state' [:workspace-drawing :object :content])]
+      (t/is (= (gpt/point 20 0)
+               (get-in state' [:workspace-local :edit-path id :last-point])))
+      (t/is (= 3 (count content'))))
+    ;; nothing selected: no pending line
+    (let [state    (selectable-path-state id content
+                                          {:nodes #{} :segments #{} :handlers #{}})
+          state'   (ptk/update (path.drawing/change-edit-mode :draw) state)]
+      (t/is (nil? (get-in state' [:workspace-local :edit-path id :last-point]))))))
+
 (t/deftest set-selection-coordinate-translates-segments
   ;; feature 42: with a segment selected, editing a coordinate translates the
   ;; segment so its surrounding rectangle's top-left corner reaches the value

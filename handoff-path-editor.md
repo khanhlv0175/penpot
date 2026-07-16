@@ -1130,7 +1130,15 @@ for features 1–3, 8, 10, and 11 is complete.
 - **Feature 42 — editable node coordinates in the right sidebar — DONE 2026-07-16 (§18).**
   The selected node's x/y show in the right panel as fully-featured editable inputs (like a
   shape's x/y); editing moves the node; multi-selection shows shared values or "mixed" and an
-  edit applies to all selected nodes (set-absolute-for-all). Live by-hand pass owed.
+  edit applies to all selected nodes (set-absolute-for-all). Extended same day to handlers and
+  segments (§18). Live by-hand pass owed.
+- **Move→draw resumes from the selected node — DONE 2026-07-16.** Switching to draw mode
+  (`drawing/change-edit-mode :draw`) with a single node selected and no line in progress now
+  starts a line from that node: new `enter-draw-from-selected-node` (run in the UpdateEvent
+  before `start-draw-mode`) sets it as `:last-point`, appending a `move-to` to open a new
+  subpath there unless the node is already the drawing tip (then it just extends). Guarded on
+  exactly one selected node + nil `:last-point`, so the created-path / draw-loop-restart flows
+  are unaffected. Test `change-to-draw-mode-starts-a-line-from-the-selected-node`. By-hand owed.
 - **Cursor sizing fix (2026-07-15):** the `draw-add`/`draw-node`/`draw-remove` badge
   cursors rendered the pen smaller than `draw` (their SVGs pack pen+badge into the
   16-unit viewBox at `scale(0.762)` vs `draw`'s `scale(0.941)`). Fixed by rendering the

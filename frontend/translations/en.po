@@ -8573,11 +8573,11 @@ msgstr "Handler behaviour"
 
 #: src/app/main/ui/workspace/viewport/path_actions.cljs
 msgid "workspace.path.actions.handler-mirror"
-msgstr "Mirrored (equal length)"
+msgstr "Equal"
 
 #: src/app/main/ui/workspace/viewport/path_actions.cljs
 msgid "workspace.path.actions.handler-aligned"
-msgstr "Mirrored angle (independent length)"
+msgstr "Aligned"
 
 #: src/app/main/ui/workspace/viewport/path_actions.cljs
 msgid "workspace.path.actions.handler-independent"

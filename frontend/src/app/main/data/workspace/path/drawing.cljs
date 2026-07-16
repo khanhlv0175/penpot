@@ -507,13 +507,43 @@
                                (rx/empty))))))
           (rx/empty))))))
 
+(defn- enter-draw-from-selected-node
+  "Switching to draw mode with a single node selected and no line in progress
+  starts a new line from that node: it becomes the pending origin, and — unless
+  it is already the drawing tip — a move-to opens a new subpath there, so the
+  next click draws a segment from the selected point."
+  [state id]
+  (let [selection  (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
+        last-point (dm/get-in state [:workspace-local :edit-path id :last-point])
+        content    (st/get-path state :content)]
+    (if (and (nil? last-point)
+             (= 1 (count selection))
+             (some? content)
+             (helpers/node? content (first selection)))
+      (let [index    (first selection)
+            pos      (helpers/node-position content index)
+            last-idx (dec (count content))
+            tip?     (and (= index last-idx)
+                          (not= :close-path (:command (nth content index nil))))
+            state    (assoc-in state [:workspace-local :edit-path id :last-point] pos)]
+        (if tip?
+          state
+          (update-in state (st/get-path-location state)
+                     (fn [shape]
+                       (-> shape
+                           (update :content path/append-segment
+                                   {:command :move-to :params (select-keys pos [:x :y])})
+                           (path/update-geometry))))))
+      state)))
+
 (defn change-edit-mode
   [mode]
   (ptk/reify ::change-edit-mode
     ptk/UpdateEvent
     (update [_ state]
       (if-let [id (dm/get-in state [:workspace-local :edition])]
-        (d/update-in-when state [:workspace-local :edit-path id] assoc :edit-mode mode)
+        (cond-> (d/update-in-when state [:workspace-local :edit-path id] assoc :edit-mode mode)
+          (= mode :draw) (enter-draw-from-selected-node id))
         state))
 
     ptk/WatchEvent
