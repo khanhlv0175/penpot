@@ -1,4 +1,32 @@
-FROM ubuntu:26.04 AS build
+# =============================================================================
+# Docker Hardened Images (DHI) migration -- Debian 13 (trixie)
+# =============================================================================
+# Build stage: dhi.io/debian-base "-dev" (JDK download + jlink, same pattern
+# as Dockerfile.imagemagick's build stage). Final stage keeps the "-dev" tag
+# too: it needs a shell + apt for its own setup (useradd, fontconfig,
+# fontforge, ImageMagick's runtime libs) -- a true non-dev runtime would mean
+# vendoring fontforge + python3 + woff-tools on top of what
+# Dockerfile.imagemagick already vendors, a much larger and more fragile
+# surface than this migration's other four-binary vendoring case
+# (Dockerfile.frontend). DHI explicitly documents "-dev as final image" as a
+# valid tradeoff, used here for that reason.
+#
+# `COPY --from=penpotapp/imagemagick:dhi-trixie` points at the migrated
+# (Debian-based) ImageMagick image, not the original Ubuntu-built one --
+# adjust the tag to whatever you pushed it under.
+#
+# Full rationale and troubleshooting history:
+# see docs/technical-guide/developer/dhi-migration-notes.md
+#
+# Requires: docker login dhi.io (free Docker ID -- DHI is free/Apache 2.0
+# since Dec 2025, no paid subscription needed; see the migration notes doc
+# for details)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# STAGE 1: build -- JDK download + jlink
+# -----------------------------------------------------------------------------
+FROM dhi.io/debian-base:trixie-debian13-dev AS build
 LABEL maintainer="Penpot <docker@penpot.app>"
 
 ENV LANG='C.UTF-8' \
@@ -47,7 +75,10 @@ RUN set -eux; \
        --add-modules java.base,jdk.net,jdk.management.agent,java.se,jdk.compiler,jdk.javadoc,jdk.attach,jdk.unsupported,jdk.jfr,jdk.jcmd \
        --output /opt/jre;
 
-FROM ubuntu:26.04 AS image
+# -----------------------------------------------------------------------------
+# STAGE 2: image -- "-dev" kept as the final runtime (see rationale above)
+# -----------------------------------------------------------------------------
+FROM dhi.io/debian-base:trixie-debian13-dev AS image
 LABEL maintainer="Penpot <docker@penpot.app>"
 
 ENV LANG='C.UTF-8' \
@@ -55,11 +86,13 @@ ENV LANG='C.UTF-8' \
     JAVA_HOME="/opt/jre" \
     PATH=/opt/jre/bin:/opt/imagick/bin:$PATH \
     DEBIAN_FRONTEND=noninteractive \
-    TZ=Etc/UTC
+    TZ=Etc/UTC \
+    LD_LIBRARY_PATH=/opt/imagick/lib/deps
 
 RUN set -ex; \
-    useradd -U -M -u 1001 -s /bin/false -d /opt/penpot penpot; \
     apt-get -qq update; \
+    apt-get -qqy --no-install-recommends install passwd; \
+    useradd -U -M -u 1001 -s /bin/false -d /opt/penpot penpot; \
     apt-get -qq dist-upgrade; \
     apt-get -qqy --no-install-recommends install \
         ca-certificates \
@@ -71,7 +104,7 @@ RUN set -ex; \
         libglib2.0-0 \
         libgomp1 \
         libheif1 \
-        libjpeg-turbo8 \
+        libjpeg62-turbo \
         liblcms2-2 \
         libopenexr-3-1-30 \
         libopenjp2-7 \
@@ -81,7 +114,7 @@ RUN set -ex; \
         libwebp7 \
         libwebpdemux2 \
         libwebpmux3 \
-        libxml2-16 \
+        libxml2 \
         libzip5 \
         libzstd1 \
         python3 \
@@ -100,7 +133,7 @@ RUN set -ex; \
     chown -R penpot:penpot /opt/data;
 
 COPY --from=build /opt/jre /opt/jre
-COPY --from=penpotapp/imagemagick:7.1.2-24 /opt/imagick /opt/imagick
+COPY --from=penpotapp/imagemagick:dhi-trixie /opt/imagick /opt/imagick
 
 COPY files/imagemagick-policy.xml /opt/imagick/etc/ImageMagick-7/policy.xml
 

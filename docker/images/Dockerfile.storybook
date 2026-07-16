@@ -1,24 +1,28 @@
-FROM nginxinc/nginx-unprivileged:1.31.1-alpine
+# =============================================================================
+# Docker Hardened Images (DHI) migration
+# =============================================================================
+# dhi.io/nginx, alpine variant (same "flavor" as the original nginx-unprivileged
+# image). Single stage, no RUN at all: nothing to compile, and the DHI runtime
+# has no shell -- the original's apk/addgroup/chown steps aren't needed
+# anyway, since the runtime already ships a fixed "nonroot" user (uid/gid
+# 65532) with the nginx directories already prepared for it.
+#
+# Full rationale and troubleshooting history:
+# see docs/technical-guide/developer/dhi-migration-notes.md
+#
+# Requires: docker login dhi.io (free Docker ID -- DHI is free/Apache 2.0
+# since Dec 2025, no paid subscription needed; see the migration notes doc
+# for details)
+# =============================================================================
+
+FROM dhi.io/nginx:1.31.1-alpine3.22
 LABEL maintainer="Penpot <docker@penpot.app>"
 
-USER root
-
-RUN set -ex; \
-    apk update; \
-    apk upgrade; \
-    rm -rf /var/cache/apk/*; \
-    addgroup -g 1001 penpot; \
-    adduser -D -H -u 1001 -s /bin/false -h /opt/penpot -G penpot penpot;
-
 ARG BUNDLE_PATH="./bundle-storybook/"
-COPY $BUNDLE_PATH /var/www/
-COPY ./files/nginx.storybook.conf /etc/nginx/conf.d/default.conf
 
-RUN chown -R 1001:0 /var/cache/nginx; \
-    chmod -R g+w /var/cache/nginx; \
-    chown -R 1001:0 /etc/nginx; \
-    chmod -R g+w /etc/nginx; \
-    chown -R 1001:0 /var/www; \
-    chmod -R g+w /var/www;
+COPY --chown=65532:65532 $BUNDLE_PATH /var/www/
+COPY --chown=65532:65532 ./files/nginx.storybook.conf /etc/nginx/conf.d/default.conf
 
-USER penpot:penpot
+# Already the default user in the DHI runtime; explicit for clarity. Numeric
+# UID, not by name -- this image has no "nonroot" entry in /etc/passwd.
+USER 65532:65532
