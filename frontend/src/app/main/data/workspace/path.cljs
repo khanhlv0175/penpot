@@ -47,6 +47,8 @@
 (dm/export selection/path-segment-leave)
 (dm/export selection/path-pointer-enter)
 (dm/export selection/path-pointer-leave)
+(dm/export selection/select-all-nodes)
+(dm/export selection/deselect-all)
 
 ;; Path tools
 (dm/export tools/make-curve)

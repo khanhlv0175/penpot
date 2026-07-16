@@ -145,6 +145,16 @@
       (let [id (st/get-path-id state)]
         (assoc-in state [:workspace-local :edit-path id :selection] helpers/empty-selection)))))
 
+(defn select-all-nodes []
+  (ptk/reify ::select-all-nodes
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (assoc helpers/empty-selection
+                             :nodes (into #{} (helpers/node-indices content)))]
+        (assoc-in state [:workspace-local :edit-path id :selection] selection)))))
+
 (defn update-area-selection
   [rect]
   (ptk/reify ::update-area-selection

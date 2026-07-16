@@ -100,6 +100,7 @@
     (tr "shortcuts.decrease-zoom")
     (tr "shortcuts.delete")
     (tr "shortcuts.delete-node")
+    (tr "shortcuts.deselect-all")
     (tr "shortcuts.detach-component")
     (tr "shortcuts.draw-curve")
     (tr "shortcuts.draw-ellipse")

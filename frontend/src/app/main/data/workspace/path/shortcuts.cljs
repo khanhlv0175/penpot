@@ -116,6 +116,16 @@
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/duplicate-selected))}
 
+   :select-all      {:tooltip (ds/meta "A")
+                     :command (ds/c-mod "a")
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/select-all-nodes))}
+
+   :deselect-all    {:tooltip (ds/meta (ds/shift "A"))
+                     :command (ds/c-mod "shift+a")
+                     :subsections [:path-editor]
+                     :fn #(st/emit! (drp/deselect-all))}
+
    :flip-horizontal {:tooltip (ds/shift "H")
                      :command "shift+h"
                      :subsections [:path-editor]
