@@ -159,7 +159,9 @@ export class WorkspacePage extends BaseWebSocketPage {
    */
   constructor(page, options) {
     super(page);
-    this.pageName = page.getByTestId("page-name");
+    // .first(): multi-page files render one page-name entry per page in the
+    // sitemap; unscoped waits/visibility checks only need any one of them.
+    this.pageName = page.getByTestId("page-name").first();
 
     this.presentUserListItems = page
       .getByTestId("active-users-list")
@@ -224,12 +226,17 @@ export class WorkspacePage extends BaseWebSocketPage {
 
     this.#ws = await this.waitForNotificationsWebSocket();
     await this.#ws.mockOpen();
-    await this.#waitForWebSocketReadiness(pageName);
+    await this.#waitForWebSocketReadiness(pageName, pageId);
   }
 
-  async #waitForWebSocketReadiness(pageName) {
+  async #waitForWebSocketReadiness(pageName, pageId) {
     // TODO: find a better event to settle whether the app is ready to receive notifications via ws
-    await expect(this.pageName).toHaveText(pageName, { timeout: 30000 })
+    // Scope by page id: with multi-page files, getByTestId("page-name")
+    // matches one sitemap entry per page (strict mode violation).
+    const pageNameLocator = pageId
+      ? this.page.getByTestId(`page-${pageId}`).getByTestId("page-name")
+      : this.pageName;
+    await expect(pageNameLocator).toHaveText(pageName, { timeout: 30000 });
   }
 
   async sendPresenceMessage(fixture) {
