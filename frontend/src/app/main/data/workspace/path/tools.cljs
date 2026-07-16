@@ -8,6 +8,8 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.common.geom.point :as gpt]
+   [app.common.math :as mth]
    [app.common.types.path :as path]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.path.helpers :as helpers]
@@ -307,6 +309,77 @@
             selected (dm/get-in state [:workspace-local :edit-path id :selection :nodes] #{})
             content  (path/distribute-content content selected axis)]
         (-> (st/set-content state content)
+            (update-in (st/get-path-location state) path/update-geometry))))))
+
+(defn- axis-point
+  "Copy of `p` with `axis` (`:x`/`:y`) replaced by `value`."
+  [p axis value]
+  (if (= axis :x) (gpt/point value (:y p)) (gpt/point (:x p) value)))
+
+(defn- handler-target-points
+  "Target control points for a handler coordinate edit: each selected handler
+  moves to its axis value, and — when its node's handler type is `:mirror` or
+  `:aligned` — the opposite handler is updated too (mirror = exact opposite,
+  aligned = mirrored angle keeping its own length). Returns a `[index prefix]`
+  -> point map for `path/set-handler-points`."
+  [content handlers handler-types axis value]
+  (reduce
+   (fn [pts [index prefix]]
+     (let [hp   (path/get-handler-point content index prefix)
+           hp'  (axis-point hp axis value)
+           node-index (helpers/handler-node-index index prefix)
+           mode (or (get handler-types node-index)
+                    (helpers/derive-handler-type content node-index))
+           [op-idx op-prefix] (path/opposite-index content index prefix)
+           pts  (assoc pts [index prefix] hp')]
+       (if (and (contains? #{:mirror :aligned} mode) (some? op-idx))
+         (let [node (path/handler->node content index prefix)
+               opp  (path/get-handler-point content op-idx op-prefix)
+               opp' (case mode
+                      :mirror  (gpt/subtract (gpt/scale node 2) hp')
+                      :aligned (let [hv (gpt/subtract hp' node)]
+                                 (if (mth/almost-zero? (gpt/length hv))
+                                   opp
+                                   (gpt/subtract node
+                                                 (gpt/scale (gpt/unit hv)
+                                                            (gpt/distance node opp))))))]
+           (assoc pts [op-idx op-prefix] opp'))
+         pts)))
+   {}
+   handlers))
+
+(defn set-selection-coordinate
+  "Sets the x or y coordinate (`axis` = `:x`/`:y`) of the current selection to
+  `value`. With segments selected the selection is translated so the top-left of
+  the rectangle surrounding the selected segments reaches `value`. Otherwise each
+  selected node is set to `value` (moving with its handles) and each selected
+  handler moves its control point (mirroring/aligning the opposite per the node's
+  handler type). Indices are preserved."
+  [axis value]
+  (ptk/reify ::set-selection-coordinate
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [id        (st/get-path-id state)
+            content   (st/get-path state :content)
+            selection (dm/get-in state [:workspace-local :edit-path id :selection])
+            htypes    (dm/get-in state [:workspace-local :edit-path id :handler-types])
+            segments  (get selection :segments #{})
+            handlers  (get selection :handlers #{})
+            node-idx  (helpers/selected-node-indices content selection)
+
+            new-content
+            (if (seq segments)
+              ;; segment mode: translate so the surrounding-rect corner = value
+              (let [rect  (path/calc-selrect (path/extract-content content {:segments segments}))
+                    cur   (if (= axis :x) (dm/get-prop rect :x) (dm/get-prop rect :y))
+                    delta (axis-point (gpt/point 0 0) axis (- value cur))]
+                (path/translate-selected-nodes content node-idx delta))
+              ;; point mode: nodes align, handlers move (with mirror/aligned)
+              (let [pts (handler-target-points content handlers htypes axis value)]
+                (cond-> content
+                  (seq node-idx) (path/set-nodes-coordinate node-idx axis value)
+                  (seq pts)      (path/set-handler-points pts))))]
+        (-> (st/set-content state new-content)
             (update-in (st/get-path-location state) path/update-geometry))))))
 
 (defn toggle-snap []

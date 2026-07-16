@@ -7,8 +7,13 @@
 (ns app.main.ui.workspace.sidebar.options.shapes.path
   (:require
    [app.common.data.macros :as dm]
+   [app.common.files.helpers :as cfh]
+   [app.common.types.path :as cpath]
    [app.common.types.shape.layout :as ctl]
+   [app.main.data.workspace.path :as drp]
+   [app.main.data.workspace.path.helpers :as path.helpers]
    [app.main.refs :as refs]
+   [app.main.store :as st]
    [app.main.ui.workspace.sidebar.options.menus.blur :refer [blur-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.constraints :refer [constraint-attrs constraints-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.exports :refer [exports-menu* exports-attrs]]
@@ -17,7 +22,7 @@
    [app.main.ui.workspace.sidebar.options.menus.layer :refer [layer-attrs layer-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-container :refer [layout-container-flex-attrs layout-container-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.layout-item :refer [layout-item-attrs layout-item-menu*]]
-   [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu*]]
+   [app.main.ui.workspace.sidebar.options.menus.measures :refer [measure-attrs measures-menu* node-position-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.shadow :refer [shadow-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.stroke :refer [stroke-attrs stroke-menu*]]
    [app.main.ui.workspace.sidebar.options.menus.svg-attrs :refer [svg-attrs-menu*]]
@@ -162,19 +167,84 @@
         (select-keys shape measure-attrs)
 
         stroke-values
-        (select-keys shape stroke-attrs)]
+        (select-keys shape stroke-attrs)
+
+        ;; Editable coordinates of the selected node(s) (feature 42). Read the
+        ;; live drawing-copy content + ephemeral selection; apply the in-progress
+        ;; `content-modifiers` so the values track the node WHILE dragging (the
+        ;; modifiers only materialize into the content on release). Node content
+        ;; is world coords; the panel shows them relative to the parent frame,
+        ;; like the shape measures, so `ox`/`oy` (the frame origin) are
+        ;; subtracted for display and added back on edit.
+        edit-path (mf/deref refs/workspace-edit-path)
+        drawing   (mf/deref refs/current-drawing-shape)
+        objects   (mf/deref refs/workspace-page-objects)
+        selection (get-in edit-path [id :selection])
+        modifiers (get-in edit-path [id :content-modifiers])
+
+        content
+        (mf/with-memo [drawing modifiers]
+          (when-let [base (get drawing :content)]
+            (cpath/apply-content-modifiers base modifiers)))
+
+        ;; parent frame origin; the page root (a top-level path) keeps absolute
+        ;; coords, a real frame/board makes them relative to it
+        frame    (cfh/get-parent-frame objects shape)
+        in-frame? (and (some? frame) (not (cfh/root? frame)))
+        ox       (if in-frame? (dm/get-prop frame :x) 0)
+        oy       (if in-frame? (dm/get-prop frame :y) 0)
+
+        ;; Coordinate values for the selection: with segments selected it is the
+        ;; top-left of the rectangle surrounding them; otherwise the shared (or
+        ;; :multiple) position of the selected node anchors + handler control
+        ;; points. All relative to the parent frame.
+        node-values
+        (mf/with-memo [content selection ox oy]
+          (when (and (some? content) (some? selection))
+            (let [segments (get selection :segments)
+                  handlers (get selection :handlers)
+                  nodes    (get selection :nodes)]
+              (cond
+                (seq segments)
+                (when-let [rect (cpath/calc-selrect
+                                 (cpath/extract-content content {:segments segments}))]
+                  {:x (- (dm/get-prop rect :x) ox)
+                   :y (- (dm/get-prop rect :y) oy)})
+
+                (or (seq nodes) (seq handlers))
+                (let [positions (into (path.helpers/node-positions content (set nodes))
+                                      (keep (fn [[i p]] (cpath/get-handler-point content i p)))
+                                      handlers)]
+                  (when (seq positions)
+                    (let [xs (into #{} (map #(- (:x %) ox)) positions)
+                          ys (into #{} (map #(- (:y %) oy)) positions)]
+                      {:x (if (= 1 (count xs)) (first xs) :multiple)
+                       :y (if (= 1 (count ys)) (first ys) :multiple)})))))))
+
+        on-node-x-change
+        (mf/use-fn (mf/deps ox)
+                   (fn [value] (when (some? value) (st/emit! (drp/set-selection-coordinate :x (+ value ox))))))
+
+        on-node-y-change
+        (mf/use-fn (mf/deps oy)
+                   (fn [value] (when (some? value) (st/emit! (drp/set-selection-coordinate :y (+ value oy))))))]
 
     [:*
-     ;; Measures are shown read-only while editing nodes: geometry (size /
-     ;; position / rotation) is owned by the drawing copy during edition and
-     ;; editing it here would neither preview nor persist reliably. The
-     ;; pointer-events wrapper keeps the values visible but non-interactive.
-     [:div {:style {:pointer-events "none" :opacity 0.6}}
-      [:> measures-menu* {:ids ids
-                          :type type
-                          :applied-tokens applied-tokens
-                          :values measure-values
-                          :shapes shapes}]]
+     (when (some? node-values)
+       [:> node-position-menu* {:values node-values
+                                :on-x-change on-node-x-change
+                                :on-y-change on-node-y-change}])
+     ;; Shape measures (read-only) are shown only when nothing is selected. While
+     ;; a node/handler/segment is selected the interactive coordinate block above
+     ;; replaces them — the shape geometry can't be edited reliably here anyway
+     ;; (it is owned by the drawing copy during edition).
+     (when (nil? node-values)
+       [:div {:style {:pointer-events "none" :opacity 0.6}}
+        [:> measures-menu* {:ids ids
+                            :type type
+                            :applied-tokens applied-tokens
+                            :values measure-values
+                            :shapes shapes}]])
      [:> fill/fill-menu*
       {:ids ids
        :type type

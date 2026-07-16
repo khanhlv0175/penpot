@@ -1105,16 +1105,32 @@ for features 1–3, 8, 10, and 11 is complete.
   feature 33's node-duplication geometry (Ctrl+D included). **The per-cell cursor
   mapping is now also implemented (2026-07-15, user-provided spec — see §15).** Still
   open: the **live by-hand pass** over the whole matrix + cursors.
-- **New batch requested 2026-07-15 (features 35–41, see §16):** **35–38 NOT yet
-  implemented** — mid-segment node creation must beat pixel-grid snap at high zoom (35);
-  `Ctrl+A` select-all-nodes (36); `Shift+Delete` = remove node + adjacent segments / open
-  path (37, reuses `remove-node-with-segments`); selected nodes recoloured to the segment
-  pink (38). **39 DONE 2026-07-16** (paste path nodes outside the editor → new path shape;
-  cross-editor splice already worked). **40 DONE** (top-bar refactor: fixed 480px width, separators,
-  add/remove-node buttons removed, unavailable node-op icons hidden not disabled). **41
-  DONE** (handler-behavior split button + popover — mirror/aligned/independent — with
-  ephemeral per-node type; geometry REPL-verified; placeholder icons + live pass owed).
-  Full analysis and file/function pointers in §16.
+- **New batch requested 2026-07-15 (features 35–41, see §16): ALL DONE.** **35 DONE
+  2026-07-16** (the node was always on-curve; the *draw-mode preview* drifted — it now
+  snaps to the on-segment insertion point when a segment is hovered, see §16/§17). **36
+  DONE 2026-07-16** (`Ctrl+A` select-all-nodes + `Ctrl+Shift+A` deselect-all). **37 DONE
+  2026-07-16** (`Shift+Delete` → new `delete-selected-with-segments`, selection-based).
+  **38 DONE 2026-07-16** (selected nodes use the segment pink; segment hover is now green
+  2px). **39 DONE 2026-07-16** (paste path nodes outside the editor → new path shape;
+  cross-editor splice already worked). **40 DONE** (top-bar refactor: fixed 480px width,
+  separators, add/remove-node buttons removed, unavailable node-op icons hidden not
+  disabled). **41 DONE** (handler-behavior split button + popover — mirror/aligned/
+  independent — with ephemeral per-node type). Full analysis/pointers in §16.
+- **Mouse-action & cursor review — DONE 2026-07-16 (§17).** A by-item pass over the
+  move/draw pointer matrix and cursors; behaviour + cursor changes landed and are the
+  current source of truth over the §14 matrices where they differ.
+- **Live by-hand pass — DONE 2026-07-16 (user).** The user walked the full editor by hand
+  (mouse/cursor matrix, cursors, features 25–41) and confirmed it works. The "owed by-hand"
+  notes scattered per-feature/per-cursor (here and in §14/§15/§16/§17) are now closed —
+  treat them as verified; residual issues get filed as separate bugs. **No path-editor work
+  items remain open.** The two parked decisions (§13 loop-close migration; Feature 41
+  cross-session persistence) were both DROPPED 2026-07-16 by user decision — not doing
+  either. Two optional non-functional **pending refactors** remain (dup-coord collapse;
+  large-path per-frame perf) — see §19; not started.
+- **Feature 42 — editable node coordinates in the right sidebar — DONE 2026-07-16 (§18).**
+  The selected node's x/y show in the right panel as fully-featured editable inputs (like a
+  shape's x/y); editing moves the node; multi-selection shows shared values or "mixed" and an
+  edit applies to all selected nodes (set-absolute-for-all). Live by-hand pass owed.
 - **Cursor sizing fix (2026-07-15):** the `draw-add`/`draw-node`/`draw-remove` badge
   cursors rendered the pen smaller than `draw` (their SVGs pack pen+badge into the
   16-unit viewBox at `scale(0.762)` vs `draw`'s `scale(0.941)`). Fixed by rendering the
@@ -1475,6 +1491,9 @@ Performance observations (no action needed yet; relevant for very large paths):
 A parking lot for things that might be worth doing but haven't been decided. Each entry
 records the trade-off, not a plan; promote to a numbered bug/feature only once decided.
 
+- **DROPPED 2026-07-16 (user decision): the one-time loop-close migration below will NOT
+  be done.** Bug 12's forward-only fix is considered sufficient; already-saved shapes with
+  the old open seam are left as-is. Kept here only for the trade-off record.
 - **One-time migration to close existing coincident-endpoint loops.** Bug 12 only fixes
   loops going forward (at draw/edit persistence); shapes already saved with the broken
   `M A … L A` seam (no `:close-path`) stay broken until they are next edited. A file-data
@@ -2084,7 +2103,9 @@ multi-select); frontend focused-suite cases (`set-handler-type`, `derive-handler
 the real handle icons; and bump the feature-40 bar width (480px) now that this group exists.
 **Limitations (ephemeral):** types are lost on editor exit (re-derived on reopen) and dropped
 on structural edits (make-corner/curve/merge/split/…); split/paste that shift indices without
-changing count are an edge (mitigated for drags by the still-joined guard).
+changing count are an edge (mitigated for drags by the still-joined guard). **DROPPED
+2026-07-16 (user decision): cross-session persistence (design-fork option C) will NOT be
+done — the ephemeral behaviour is final.**
 
 **IMPORTANT rumext gotcha found here (applies to feature 40 too):** rumext v2 compiles
 hiccup at macro-expansion, so **runtime-built hiccup does not render** — `(into [:div …] …)`
@@ -2159,3 +2180,229 @@ focused suite green (add cases: `select-all-nodes`, the shift+delete binding →
 fn changes. Then the live by-hand pass (high-zoom insert for 35, Ctrl+A/Shift+Del, node
 colour, outside/cross-editor paste, toolbar look + handler-mode popover) — automation
 can't enter edit mode this session (§7).
+
+## 17. Mouse-action & cursor review (2026-07-16) — DONE
+
+A by-item review of the move/draw pointer matrix and cursors, done interactively one
+change at a time. These supersede the §14 matrices / §15 cursors where they differ.
+All items: compiler `:ok`, `clj-kondo` 0/0, `cljfmt` clean; frontend focused suite 57/154
+and common suite 150/484 green.
+
+**Live by-hand pass DONE 2026-07-16 (user).** The user walked the whole path editor by
+hand — the mouse-action/cursor matrix (§17), the cursors, and features 25–41 — and
+confirmed it all works as intended. This closes the outstanding "live by-hand" item that
+the per-feature/per-cursor notes below (and in §14/§15/§16) still mention as owed; treat
+those as verified. Any residual issues will be filed as separate bugs rather than tracked
+here.
+
+Also landed just before the review: **move cursors enlarged to 25×25** (`ui/cursors.cljs`)
+so the pointer matches the `draw` pen physically (same fix as the draw badges; the base
+`move` SVG is also `scale(0.762)`); and **handler-drag matching modifiers made live** —
+`drag-selected-handlers` computes the mode per frame from the stream's live `:mod?/:alt?`
+(see the live-modifier item below, which generalised this).
+
+1. **Move-mode SEGMENT operations** (`edition/start-move-path-segment`,
+   `editor/segment-cursor`, hover-preview hook): **ctrl = curve only** (click →
+   `tools/toggle-segment-curve`, drag → bend); **alt = add node** (click → insert-anywhere
+   `create-node-at-position`, drag → duplicate); **ctrl+alt = remove segment**. Cursors:
+   add → `draw-add`, remove → `draw-remove`, ctrl → `move-curve`, alt-drag → `move-copy`.
+   The insert **preview** now shows under alt (anywhere) and no-modifier (middle), hidden
+   under ctrl.
+2. **ctrl+click curve is visibly bowed** (`segment/toggle-segment-curve`): the line→curve
+   default handles are offset perpendicular by `curve-toggle-bow` (0.25 × length) instead
+   of collinear, so the toggle produces a visible arc, not a straight curve-to. Tests
+   updated (common + frontend).
+3. **Shift (and the other drag modifiers) apply live mid-drag** (`streams/move-points-stream`,
+   `move-handler-stream`, `position-stream`; `edition/curve-config-node-drag`): swapped the
+   pointer-derived `ms/mouse-position-*` for the **keyboard** streams via
+   `rx/combine-latest-with`, so pressing/releasing a modifier re-emits immediately — the
+   15° constraint (and the handler matching mode) engage without needing pointer movement.
+4. **make-curve on an acute corner is smooth** (`segment/make-curve-point`, count=2 branch):
+   handles are built from the **unit** leg directions — tangent `= unit(u_next − u_prev)`
+   (perpendicular to the bisector), equal length `⅓·min(leg)`, opposite sides via
+   `dot(dir, tangent)` sign. Fixes the old chord-projection that put both handles on the
+   same side (cusp) for acute corners. New test
+   `segment-make-curve-point-acute-corner-is-smooth`.
+5. **Move-mode NODE operations** (`edition/start-move-path-point`, `editor/node-cursor`):
+   **alt+click = remove node (heal)** `tools/remove-node`; **alt+drag = duplicate** (kept);
+   **ctrl+alt+click = remove node + surrounding segments (no heal)**
+   `tools/remove-node-with-segments`. Cursor: alt/ctrl+alt hover → `draw-remove`, alt-drag →
+   `move-copy`. (Mirrors Delete = alt-click, Shift+Delete = ctrl+alt-click.)
+6. **ctrl+drag curve-config is smooth whichever way you drag**
+   (`edition/curve-config-modifier` + `curve-config-node-drag`): the drag direction picks a
+   sign `s = sign(dot(v, unit(→out) − unit(→in)))`; outgoing handle `= node + s·v`, incoming
+   `= node − s·v`. The handle on the drag side follows the pointer, the other mirrors, and
+   each stays on its own segment's side — no more loop/cusp when dragging toward the
+   incoming side. Endpoints keep a single pointer-following handle. New `in-neighbour`/
+   `out-neighbour` params.
+7. **Draw-mode: removing the segment/node the pending line hangs from clears the pending**
+   (`drawing/on-draw-segment-pointer-down`; node case already did this via `pending-origin?`).
+   The segment alt/ctrl+alt removal now also emits `common/cancel-pending-segment` when
+   `last-point` is one of the removed segment's endpoints, so the next click starts a fresh
+   subpath instead of previewing from a removed point.
+
+## 18. Feature 42 — editable node coordinates in the right sidebar — DONE 2026-07-16
+
+**Implemented.** Decisions taken: multi-select = **set-absolute-for-all** (each selected
+node's chosen axis is set to the entered value); the read-only shape measures are **kept**
+and the editable node x/y block is added **above** them; a **segment** selection folds in
+its endpoint nodes (via `selected-node-indices`). Summary:
+- **Common** `segment/set-nodes-coordinate [content indices axis value]` (+ `path/…` wrapper):
+  per-node delta `value − current` on `axis`, applied through the existing `translate-nodes`
+  (moves each node's anchor + attached handles rigidly). Works for one or many nodes. Test
+  `segment-set-nodes-coordinate`.
+- **Frontend** `tools/set-nodes-coordinate [axis value]` (exported from `path.cljs`): resolves
+  the selection with `helpers/selected-node-indices`, applies `path/set-nodes-coordinate` to
+  the drawing-copy content + `update-geometry` — same pipeline as `align-nodes`, so it
+  previews live and persists once on exit; path-local undo captures it. Store test
+  `set-nodes-coordinate-moves-selected-nodes` (single + multi).
+- **UI** `node-position-menu*` (in `menus/measures.cljs`, presentational: `{:values :on-x-change
+  :on-y-change}`, reuses the shape position inputs' markup/`numeric-input*`, so drag-scrub/
+  arithmetic come for free). Wired in `options/shapes/path.cljs path-edition-options*`: derefs
+  `refs/workspace-edit-path` (selection) + `refs/current-drawing-shape` (live content), computes
+  the selected nodes' shared x/y or `:multiple`, and emits `drp/set-nodes-coordinate`. Shown
+  only when ≥1 node resolves. Node coords are **world coords** (the content's own space).
+- Verified: compiler `:ok`, `clj-kondo` 0/0, `cljfmt` clean, common 152/488, frontend 58/160.
+
+**Refinements (2026-07-16, same session):**
+- **Live during a node drag.** The panel applies the in-progress `content-modifiers`
+  (`cpath/apply-content-modifiers base-content modifiers`) before reading positions, so the
+  x/y update every frame while dragging (the modifiers only materialize into `:content` on
+  release). Reactive because `path-edition-options*` derefs `refs/workspace-edit-path` (which
+  contains `[id :content-modifiers]`) and `refs/current-drawing-shape`.
+- **Container-relative coordinates.** Node content is world coords; the panel now shows them
+  relative to the parent frame like shapes do (`update-position`/`calculate-delta` treat the
+  shape x/y input as parent-frame-relative). Offset `ox/oy = parent frame :x/:y`, or `0` when
+  the parent is the page root (`cfh/get-parent-frame` + `cfh/root?`) so a top-level path stays
+  absolute. Subtracted for display, added back on edit (`set-nodes-coordinate` still takes a
+  world value).
+- **Layout.** `node-position-menu*` wraps its `:position` row in a `:section.element-set` so
+  the `subgrid` resolves — X and Y sit in one row / two columns, matching the shape measures.
+- **Handlers too.** The block covers selected **handlers** as well as nodes: display folds in
+  each selected handler's control-point position (`cpath/get-handler-point`, reflects live drag
+  deltas), and the event became `tools/set-selection-coordinate` — nodes move with their
+  handles (`path/set-nodes-coordinate`), handlers move only their own control point (new common
+  `segment/set-handlers-coordinate` — sets one axis of `:c1x/:c1y/:c2x/:c2y`, ignores non-curve
+  commands). A selection with both applies to all. Tests `segment-set-handlers-coordinate`
+  (common) + a handler case in `set-selection-coordinate-moves-selected-points` (frontend).
+
+- **Handler mirror/aligned opposite.** A handler coordinate edit now updates the matching
+  (opposite) handler when the node's handler type (feature 41) is `:mirror` (exact opposite:
+  `2·node − H'`) or `:aligned` (mirrored angle keeping the opposite's own length); `:independent`
+  moves the handler alone. The effective type is the stored `:handler-types[node]` else
+  `derive-handler-type`. Built in `tools/handler-target-points` (frontend), applied via the new
+  common `segment/set-handler-points` (a `[index prefix] -> point` map). Tests
+  `set-selection-coordinate-mirrors-opposite-handler` (frontend) + `segment-set-handler-points`.
+- **Hide shape measures when a node/handler/segment is selected.** `path-edition-options*` now
+  renders the read-only shape measures only when nothing is selected (`(when (nil? node-values) …)`);
+  the interactive coordinate block replaces them while editing.
+- **Segments.** With segments selected the block shows the **top-left of the rectangle
+  surrounding the selected segments** (`path/calc-selrect` of `path/extract-content
+  {:segments …}`); editing **translates** the selected segments (their endpoint nodes + handles,
+  via new common `segment/translate-selected-nodes` with a uniform delta) so that corner reaches
+  the value. Point mode (nodes/handlers) is unchanged. Tests
+  `set-selection-coordinate-translates-segments` (frontend) + `segment-translate-selected-nodes`.
+
+**Owed:** live by-hand (edit a node/handler/segment x/y → it moves + persists; handler on a
+mirror/aligned node moves its opposite; drag → panel tracks live; board-relative coords; measures
+hidden while selecting; multi-select shared/mixed + apply-all).
+
+### Original spec / analysis (for reference)
+
+**Requirement (user's words, faithfully):** when a node is selected during path edition,
+its **x/y coordinates appear in the right sidebar**. The coordinates are **editable and
+have all the features of a shape's x/y** (the numeric input: drag-to-scrub, arithmetic,
+etc.). Editing a coordinate **moves the node**. It must also work for **multi-selection**:
+if the selected nodes share the same x (or y) show that value, otherwise show **mixed**;
+changing a coordinate with a multi-selection **applies to all selected nodes**.
+
+**Distinction from feature 28 (important).** Feature 28's `path-edition-options*`
+(`ui/workspace/sidebar/options/shapes/path.cljs`) already renders the **shape's** measures
+(size/position/rotation) via `measures-menu*` but wrapped **read-only**
+(`{:style {:pointer-events "none" :opacity 0.6}}`) — because the shape geometry is owned by
+the drawing copy during edition and editing it there neither previews nor persists reliably
+(`finalize-path-content` only writes `:content`; WASM bakes rotation into content). Feature
+42 is **different**: it adds an editable block for the **selected node's own coordinates**
+(a point in the path content), not the shape bbox. The shape size/rotation stay read-only;
+only a new **node x/y** block is interactive. (Optionally the read-only shape *position*
+row could be replaced by this node block while nodes are selected — a UI decision.)
+
+**Coordinate space.** Node positions come from `helpers/node-position` / `node-positions`
+(content-command index → point) and are in **world coords** (WASM content convention),
+i.e. the same space arrow-move / drag use — NOT the shape bbox top-left that `measures-menu*`
+shows. Display and edit the node's world x/y directly. Watch the classic-vs-WASM
+distinction if the non-WASM renderer is ever in play.
+
+**Move pipeline to reuse (already exists, drawing-copy isolated).** Setting a coordinate =
+moving the node by `delta = target − current` on that axis. Route it through the same
+modifier pipeline the arrow-nudge uses so it previews live and commits once on exit:
+`edition/set-move-modifier` (accumulates `content-modifiers`; already takes a `handler-ids`
+param and moves a node rigidly with its handles) → `apply-content-modifiers` (materializes
+into the drawing copy + `update-geometry`). See `edition/move-selected` (arrow event, line
+~724) and `move-node-indices` (~276) for the exact grouped-selection move; a coordinate
+edit is just an absolute-position variant of the same thing. Selection lives at
+`[:workspace-local :edit-path id :selection :nodes]` (index set); resolve to positions with
+`helpers/node-positions`.
+
+**Multi-select semantics (needs a confirmation, but the wording points one way).** "applied
+to all selected nodes" + "same → value, else mixed" reads as **set-absolute-for-all**: an
+entered x sets **every** selected node's x to that value (align them to x = value); the
+other axis is untouched. This differs from shape multi-select (which moves the group's bbox
+origin). Confirm with the user before building; the align-all reading is the primary
+interpretation. "mixed" display: compute whether all selected node xs are equal (and same
+for y); if not, feed the input `:multiple` (the existing measures input already renders
+`:multiple` as the mixed placeholder — reuse that convention).
+
+**UI approach.** Reuse the shape x/y **numeric input widget** (the `:x`/`:y` rows inside
+`measures-menu*` / the shared `numeric-input*` component) rather than the whole
+`measures-menu*` (which is bound to the bbox position via `:points`). Likely a small new
+component (e.g. `node-position-menu*`) that: reads the selected node indices + content from
+the edit-path state, computes shared/`:multiple` x and y, renders two inputs with
+`on-change` → a new `path` event (e.g. `set-nodes-coordinate axis value`) that applies the
+absolute set to all selected nodes via the move pipeline above. Render it in
+`path-edition-options*` (gated on ≥1 selected node), above or replacing the read-only
+position row.
+
+**Pointers:**
+- `ui/workspace/sidebar/options/shapes/path.cljs` `path-edition-options*` — where to add the
+  node block; it already receives the stored `shape`. It needs the **edit-path selection**
+  too (new `refs`/`use-deref`, cf. feature 28's `refs/workspace-edit-path`), since the panel
+  currently only sees the stored shape, not the ephemeral selection/drawing-copy content.
+- `ui/workspace/sidebar/options/menus/measures.cljs` — the x/y input rows + `:multiple`
+  handling to mimic/reuse.
+- `data/workspace/path/edition.cljs` — `set-move-modifier`, `move-node-indices`,
+  `move-selected`, `apply-content-modifiers` (the move pipeline); add the coordinate-set
+  event here (or in `tools.cljs`) and export from `path.cljs`.
+- `data/workspace/path/helpers.cljs` — `node-position`, `node-positions`, `node-indices`,
+  `selected-node-indices` (fold segment endpoints too if a segment selection should count).
+- Tests: a common/pure test isn't needed (no new geometry); add a frontend store test that
+  sets a coordinate on a single and a multi node selection and asserts the drawing-copy
+  content moved the right node(s), plus a `:multiple` display test.
+
+**Owed decisions before coding:** (1) confirm multi-select = set-absolute-for-all vs
+move-as-group; (2) whether to also show/keep the read-only shape position row or replace it
+with the node block while editing; (3) whether a **segment** selection contributes its
+endpoint nodes to the coordinate block (consistent with other ops via
+`selected-node-indices`) or only pure node selections show it.
+
+## 19. Pending refactors (optional, non-functional — not started)
+
+Neither is required for correctness; they are cleanups to pick up if/when worth it.
+
+- **Push node indices into the common path tool fns (remove the dup-coordinate collapse).**
+  The common-layer tool fns (`remove-nodes`, the editor's handler grouping `path/get-handlers`,
+  the `is-last` checks) are still position-based, so node identities are converted
+  indices→positions at the boundary (`move-selected-path-point`, `drag-selected-points`,
+  `move-selected` arrows, `streams/move-points-stream`, `snap/create-ranges`,
+  `path-actions/check-enabled` — see §9). Consequence: nodes with duplicate coordinates stay
+  ambiguous **only** inside those position-based common fns. Pushing stable content-command
+  indices into them removes the collapse. Groundwork/context: §9, §12.
+- **Reduce per-frame O(n) recompute in `path-editor*` during drags (large paths).** Every
+  pointermove re-runs `apply-content-modifiers` over the full content, `get-points`,
+  node/segment/handler entry recomputation, a full-path `.toString`, and two PathData +
+  `toString` builds per segment hit target — O(n) work + allocation churn per frame; and with
+  snap on, `path-snap*` recomputes `snap/create-ranges` every frame (the drag pipeline already
+  builds ranges once per gesture in `move-points-stream`). Ideas: memoize per-segment content
+  on stable values or skip segment hit targets while a drag is active; derive the editor snap
+  ranges from the drag-start content (once per gesture). Only matters for very large paths.
+  Detail: §12.

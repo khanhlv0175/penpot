@@ -70,6 +70,7 @@
 (dm/export tools/flip-nodes)
 (dm/export tools/align-nodes)
 (dm/export tools/distribute-nodes)
+(dm/export tools/set-selection-coordinate)
 
 ;; Undo/redo
 (dm/export undo/undo-path)

@@ -1404,6 +1404,50 @@
     (t/is (= {:c1x 2.0 :c1y 1.0 :c2x 8.0 :c2y 1.0 :x 10.0 :y 0.0}
              (:params (second result))))))
 
+(t/deftest segment-set-nodes-coordinate
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 20.0 :y 0.0}}])]
+    ;; setting x for two nodes moves each to that x (per-node delta), the
+    ;; unselected node is untouched
+    (t/is (= [[:move-to {:x 5.0 :y 0.0}]
+              [:line-to {:x 10.0 :y 0.0}]
+              [:line-to {:x 5.0 :y 0.0}]]
+             (mapv (juxt :command :params)
+                   (vec (path/set-nodes-coordinate content #{0 2} :x 5.0)))))
+    ;; a single node's y moves only that node, and its attached handle moves
+    ;; rigidly with the anchor
+    (let [curved (path/content
+                  [{:command :move-to :params {:x 0.0 :y 0.0}}
+                   {:command :curve-to :params {:c1x 2.0 :c1y 0.0 :c2x 8.0 :c2y 0.0 :x 10.0 :y 0.0}}])
+          r      (vec (path/set-nodes-coordinate curved #{1} :y 5.0))]
+      ;; node 1 anchor y 0 -> 5 (delta +5); its :c2 handle (owned by node 1)
+      ;; moves +5 too; :c1 (owned by node 0, unselected) stays
+      (t/is (= {:c1x 2.0 :c1y 0.0 :c2x 8.0 :c2y 5.0 :x 10.0 :y 5.0}
+               (:params (second r)))))))
+
+(t/deftest segment-set-handler-points
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :curve-to :params {:c1x 2.0 :c1y 2.0 :c2x 8.0 :c2y 2.0 :x 10.0 :y 0.0}}])
+        r       (vec (path/set-handler-points content {[1 :c2] (gpt/point 7.0 6.0)}))]
+    ;; c2 set to the target point; c1 and the anchor stay put
+    (t/is (= {:c1x 2.0 :c1y 2.0 :c2x 7.0 :c2y 6.0 :x 10.0 :y 0.0}
+             (:params (second r))))))
+
+(t/deftest segment-translate-selected-nodes
+  (let [content (path/content
+                 [{:command :move-to :params {:x 0.0 :y 0.0}}
+                  {:command :line-to :params {:x 10.0 :y 0.0}}
+                  {:command :line-to :params {:x 20.0 :y 0.0}}])
+        ;; translate nodes 1 and 2 by (0, 5): both move down, node 0 stays
+        r       (vec (path/translate-selected-nodes content #{1 2} (gpt/point 0.0 5.0)))]
+    (t/is (= [[:move-to {:x 0.0 :y 0.0}]
+              [:line-to {:x 10.0 :y 5.0}]
+              [:line-to {:x 20.0 :y 5.0}]]
+             (mapv (juxt :command :params) r)))))
+
 (t/deftest segment-distribute-content
   (let [content (path/content
                  [{:command :move-to :params {:x 0.0 :y 0.0}}

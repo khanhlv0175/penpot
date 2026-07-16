@@ -517,6 +517,27 @@
   (let [content (impl/path-data content)]
     (segment/distribute-content content indices axis)))
 
+(defn set-nodes-coordinate
+  "Sets the `:x`/`:y` coordinate (`axis`) of the selected node `indices` to
+  `value`, moving each node and its handles."
+  [content indices axis value]
+  (let [content (impl/path-data content)]
+    (segment/set-nodes-coordinate content indices axis value)))
+
+(defn set-handler-points
+  "Sets each handler control point (`pts`: `[index prefix]` -> point) to its
+  target point, moving only that control point."
+  [content pts]
+  (let [content (impl/path-data content)]
+    (segment/set-handler-points content pts)))
+
+(defn translate-selected-nodes
+  "Translates the given node `indices` (anchors + attached handles) by a single
+  `delta`."
+  [content indices delta]
+  (let [content (impl/path-data content)]
+    (segment/translate-selected-nodes content indices delta)))
+
 (defn- calc-bool-content*
   "Calculate the boolean content from shape and objects. Returns plain
   vector of segments"

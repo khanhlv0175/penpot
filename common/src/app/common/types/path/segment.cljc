@@ -458,6 +458,48 @@
                   entries)]
         (impl/from-plain (translate-nodes content indices deltas))))))
 
+(defn set-nodes-coordinate
+  "Sets the `:x` or `:y` coordinate (`axis`) of every selected node `indices` to
+  `value`, moving each node's attached handles rigidly with it; the other axis is
+  unchanged. Works for one or many nodes (every selected node's coordinate becomes
+  `value`). Indices are preserved."
+  [content indices axis value]
+  (let [content (vec content)
+        indices (set indices)
+        entries (selected-node-entries content indices)
+        deltas  (into {}
+                      (map (fn [[i p]]
+                             [i (if (= axis :x)
+                                  (gpt/point (- value (:x p)) 0)
+                                  (gpt/point 0 (- value (:y p))))]))
+                      entries)]
+    (impl/from-plain (translate-nodes content indices deltas))))
+
+(defn set-handler-points
+  "Sets each handler control point to a target point. `pts` is a map from
+  `[command-index prefix]` to a point; handlers on non-curve commands are
+  ignored. Indices are preserved."
+  [content pts]
+  (impl/from-plain
+   (reduce
+    (fn [content [[index prefix] pt]]
+      (if (= :curve-to (:command (get content index)))
+        (let [[cx cy] (if (= prefix :c1) [:c1x :c1y] [:c2x :c2y])]
+          (-> content
+              (assoc-in [index :params cx] (:x pt))
+              (assoc-in [index :params cy] (:y pt))))
+        content))
+    (vec content)
+    pts)))
+
+(defn translate-selected-nodes
+  "Translates the given node `indices` (each anchor plus its attached handles)
+  by a single `delta` point. Used to move a whole segment/selection rigidly."
+  [content indices delta]
+  (let [indices (set indices)]
+    (impl/from-plain
+     (translate-nodes content indices (into {} (map (fn [i] [i delta])) indices)))))
+
 (defn distribute-content
   "Distributes the selected node `indices` evenly along `axis` (`:horizontal`
   or `:vertical`) between the two extreme selected nodes. Coincident selected

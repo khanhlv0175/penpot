@@ -176,6 +176,33 @@
          (identical? (get o-values :proportion-lock)
                      (get n-values :proportion-lock)))))
 
+(mf/defc node-position-menu*
+  "X/Y inputs for the selected path node(s) during path edition. `values` is
+  `{:x <num|:multiple> :y <num|:multiple>}`; `on-x-change`/`on-y-change` receive
+  the new numeric value. Reuses the shape position inputs' look and features
+  (drag-scrub, arithmetic) but drives node coordinates instead of the shape's."
+  [{:keys [values on-x-change on-y-change]}]
+  ;; Same `element-set` > `position` grid the shape measures use, so X and Y sit
+  ;; in one row / two columns.
+  [:section {:class (stl/css :element-set)}
+   [:div {:class (stl/css :position)}
+    [:div {:class (stl/css :x-position)
+           :title (tr "workspace.options.x")}
+     [:span {:class (stl/css :icon-text)} "X"]
+     [:> deprecated-input/numeric-input* {:no-validate true
+                                          :placeholder (if (= :multiple (:x values)) (tr "settings.multiple") "--")
+                                          :on-change on-x-change
+                                          :class (stl/css :numeric-input)
+                                          :value (:x values)}]]
+    [:div {:class (stl/css :y-position)
+           :title (tr "workspace.options.y")}
+     [:span {:class (stl/css :icon-text)} "Y"]
+     [:> deprecated-input/numeric-input* {:no-validate true
+                                          :placeholder (if (= :multiple (:y values)) (tr "settings.multiple") "--")
+                                          :on-change on-y-change
+                                          :class (stl/css :numeric-input)
+                                          :value (:y values)}]]]])
+
 (mf/defc measures-menu*
   {::mf/wrap [#(mf/memo' % check-measures-menu-props)]}
   [{:keys [ids values applied-tokens type shapes]}]

@@ -390,6 +390,83 @@
     (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
     (t/is (= (gpt/point 10 9) (path.helpers/node-position content' 2)))))
 
+(t/deftest set-selection-coordinate-moves-selected-points
+  ;; feature 42: editing a coordinate in the sidebar moves the selected node(s)
+  ;; and/or handler(s)
+  (let [id      (random-uuid)
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :line-to :params {:x 10 :y 0}}
+                  {:command :line-to :params {:x 20 :y 0}}])]
+    ;; single node: only that node moves
+    (let [state    (selectable-path-state id content
+                                          {:nodes #{1} :segments #{} :handlers #{}})
+          state'   (ptk/update (path.tools/set-selection-coordinate :y 7) state)
+          content' (get-in state' [:workspace-drawing :object :content])]
+      (t/is (= (gpt/point 10 7) (path.helpers/node-position content' 1)))
+      (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
+      (t/is (= (gpt/point 20 0) (path.helpers/node-position content' 2))))
+    ;; multi node: every selected node's coordinate is set to the value
+    (let [state    (selectable-path-state id content
+                                          {:nodes #{0 2} :segments #{} :handlers #{}})
+          state'   (ptk/update (path.tools/set-selection-coordinate :x 5) state)
+          content' (get-in state' [:workspace-drawing :object :content])]
+      (t/is (= (gpt/point 5 0)  (path.helpers/node-position content' 0)))
+      (t/is (= (gpt/point 5 0)  (path.helpers/node-position content' 2)))
+      (t/is (= (gpt/point 10 0) (path.helpers/node-position content' 1)))))
+  ;; a selected handler on an independent node moves only its own control point
+  (let [id      (random-uuid)
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :curve-to :params {:c1x 2 :c1y 2 :c2x 8 :c2y 2 :x 10 :y 0}}])
+        state   (selectable-path-state id content
+                                       {:nodes #{} :segments #{} :handlers #{[1 :c1]}})
+        state'  (ptk/update (path.tools/set-selection-coordinate :x 4) state)
+        curve   (nth (get-in state' [:workspace-drawing :object :content]) 1)]
+    ;; c1 x set to 4; c1y, c2 and the anchor untouched
+    (t/is (= 4 (get-in curve [:params :c1x])))
+    (t/is (= 2 (get-in curve [:params :c1y])))
+    (t/is (= 8 (get-in curve [:params :c2x])))
+    (t/is (= 10 (get-in curve [:params :x])))))
+
+(t/deftest set-selection-coordinate-mirrors-opposite-handler
+  ;; feature 42: moving a handler on a mirror (smooth, equal-length) node updates
+  ;; the opposite handler to stay mirrored
+  (let [id      (random-uuid)
+        ;; node 1 (10,0) has collinear equal handles: c2 of cmd1 at (8,-2) and
+        ;; c1 of cmd2 at (12,2) — a mirror node by geometry
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :curve-to :params {:c1x 2 :c1y 0 :c2x 8 :c2y -2 :x 10 :y 0}}
+                  {:command :curve-to :params {:c1x 12 :c1y 2 :c2x 18 :c2y 0 :x 20 :y 0}}])
+        state   (selectable-path-state id content
+                                       {:nodes #{} :segments #{} :handlers #{[1 :c2]}})
+        state'  (ptk/update (path.tools/set-selection-coordinate :x 6) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; dragged handle c2 of cmd1 -> x=6 (keeps y=-2)
+    (t/is (= (gpt/point 6 -2) (path/get-handler-point content' 1 :c2)))
+    ;; opposite (c1 of cmd2) mirrors it about the node (10,0): 2*10-6=14, 2*0-(-2)=2
+    (t/is (= (gpt/point 14 2) (path/get-handler-point content' 2 :c1)))))
+
+(t/deftest set-selection-coordinate-translates-segments
+  ;; feature 42: with a segment selected, editing a coordinate translates the
+  ;; segment so its surrounding rectangle's top-left corner reaches the value
+  (let [id      (random-uuid)
+        content (path/content
+                 [{:command :move-to :params {:x 0 :y 0}}
+                  {:command :line-to :params {:x 10 :y 0}}
+                  {:command :line-to :params {:x 10 :y 10}}])
+        ;; select segment index 2 (the vertical line from (10,0) to (10,10));
+        ;; its surrounding rect top-left x is 10
+        state   (selectable-path-state id content
+                                       {:nodes #{} :segments #{2} :handlers #{}})
+        state'  (ptk/update (path.tools/set-selection-coordinate :x 30) state)
+        content' (get-in state' [:workspace-drawing :object :content])]
+    ;; the segment's endpoint nodes (1 and 2) move +20 in x; node 0 stays
+    (t/is (= (gpt/point 0 0)  (path.helpers/node-position content' 0)))
+    (t/is (= (gpt/point 30 0) (path.helpers/node-position content' 1)))
+    (t/is (= (gpt/point 30 10) (path.helpers/node-position content' 2)))))
+
 (t/deftest selected-node-indices-folds-segment-endpoints
   (let [content (selectable-path-content)]
     ;; segment index 1 connects nodes 0 and 1
