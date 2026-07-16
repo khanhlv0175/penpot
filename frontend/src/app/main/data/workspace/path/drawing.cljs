@@ -83,6 +83,12 @@
   (or (restart-draw-loop? event)
       (exit-draw-loop? event)))
 
+(def ^:private draw-insert-threshold
+  "Distance (board px, divided by zoom at the call site) within which a
+  draw-mode segment click resolves the exact point to insert; slightly wider
+  than the segment's hit stroke so clicks at its edge still insert."
+  16)
+
 (defn preview-next-point
   [{:keys [x y shift?]}]
   (ptk/reify ::preview-next-point
@@ -97,9 +103,30 @@
           state
           (let [fix-angle? shift?
                 {:keys [last-point prev-handler]} edit-path
-                position   (cond-> (gpt/point x y)
-                             fix-angle? (path.helpers/position-fixed-angle last-point))
                 content    (st/get-path state :content)
+                zoom       (dm/get-in state [:workspace-local :zoom] 1)
+                raw-pos    @ms/mouse-position
+
+                ;; Over an existing segment (a click there inserts a node ON the
+                ;; segment) the preview must show that exact on-curve point, from
+                ;; the raw pointer so it beats pixel-grid snap and matches where
+                ;; the click lands — not the pixel-snapped free position from
+                ;; `position-stream`. Gated on the segment hover set, which is the
+                ;; same hit area that routes the click to segment insertion.
+                insert-point (when (and (seq (:segments (:hover edit-path)))
+                                        (gpt/point? raw-pos))
+                               (helpers/insertion-point
+                                content raw-pos (/ draw-insert-threshold zoom) true))
+
+                position   (cond
+                             (some? insert-point)
+                             insert-point
+
+                             fix-angle?
+                             (path.helpers/position-fixed-angle (gpt/point x y) last-point)
+
+                             :else
+                             (gpt/point x y))
                 segment    (path/next-node content position last-point prev-handler)]
             (assoc-in state [:workspace-local :edit-path id :preview] segment)))))))
 
@@ -556,12 +583,6 @@
 
           :else
           (rx/of (close-path-drag-start position)))))))
-
-(def ^:private draw-insert-threshold
-  "Distance (board px, divided by zoom at the call site) within which a
-  draw-mode segment click resolves the exact point to insert; slightly wider
-  than the segment's hit stroke so clicks at its edge still insert."
-  16)
 
 (defn on-draw-segment-pointer-down
   "Draw-mode segment pointer-down dispatcher. Without modifiers it inserts a
