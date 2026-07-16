@@ -576,10 +576,36 @@
 
     (if (= (count points) 2)
       (let [[fpoint spoint] (vec points)
-            v1 (gpt/to-vec fpoint point)
-            v2 (gpt/to-vec fpoint spoint)
-            vp (gpt/project v1 v2)
-            vh (gpt/subtract v1 vp)
+
+            ;; Unit leg directions from the node toward each neighbour.
+            u-f     (gpt/unit (gpt/to-vec point fpoint))
+            u-s     (gpt/unit (gpt/to-vec point spoint))
+
+            ;; Tangent line through the node, symmetric w.r.t. both legs
+            ;; (perpendicular to the angle bisector). Built from the *unit* leg
+            ;; directions so the two handles stay opposite and equal — tangent
+            ;; to the corner — for any angle, including very acute corners where
+            ;; the old chord projection put both handles on the same side. A
+            ;; degenerate (hairpin) corner falls back to a perpendicular leg.
+            tangent (let [d (gpt/subtract u-s u-f)]
+                      (if (mth/almost-zero? (gpt/length d))
+                        (gpt/perpendicular u-f)
+                        (gpt/unit d)))
+
+            ;; Equal handle length: a third of the shorter leg, so neither
+            ;; handle overshoots its own segment.
+            len     (/ (min (gpt/distance point fpoint)
+                            (gpt/distance point spoint))
+                       3)
+
+            ;; Handle at the node for a neighbour, placed `len` along the tangent
+            ;; on that neighbour's side.
+            handle-for
+            (fn [neighbour]
+              (when (some? neighbour)
+                (let [dir  (gpt/unit (gpt/to-vec point neighbour))
+                      side (if (neg? (gpt/dot dir tangent)) -1 1)]
+                  (gpt/add point (gpt/scale tangent (* side len))))))
 
             add-curve
             (fn [content {:keys [index prev-p next-p next-i]}]
@@ -589,25 +615,8 @@
                     next-segment (get content next-i)
                     next-command (get next-segment :command)
 
-                    ;; New handlers for prev-point and next-point
-                    prev-h
-                    (when (some? prev-p) (gpt/add prev-p vh))
-
-                    next-h
-                    (when (some? next-p) (gpt/add next-p vh))
-
-                    ;; Correct 1/3 to the point improves the curve
-                    prev-correction
-                    (when (some? prev-h) (gpt/scale (gpt/to-vec prev-h point) (/ 1 3)))
-
-                    next-correction
-                    (when (some? next-h) (gpt/scale (gpt/to-vec next-h point) (/ 1 3)))
-
-                    prev-h
-                    (when (some? prev-h) (gpt/add prev-h prev-correction))
-
-                    next-h
-                    (when (some? next-h) (gpt/add next-h next-correction))]
+                    prev-h (handle-for prev-p)
+                    next-h (handle-for next-p)]
 
                 (cond-> content
                   (and (= :line-to curr-command) (some? prev-p))
@@ -737,11 +746,18 @@
            (remove-line-curves)))
       (impl/from-plain content))))
 
+(def ^:private curve-toggle-bow
+  "Perpendicular offset (as a fraction of the segment length) applied to both
+  control points when turning a line into a curve, so the result is a visibly
+  bowed curve instead of a straight collinear curve-to."
+  0.25)
+
 (defn toggle-segment-curve
   "Toggles the segment at `index` between a straight line and a curve: a
-  line-to becomes a curve-to with default handles a third of the way from
-  each endpoint, and a curve-to drops its control points back to a line-to.
-  Move-to and close-path commands are left untouched."
+  line-to becomes a curve-to bowed to one side (handles a third of the way from
+  each endpoint, offset perpendicular so the curve is visibly bent), and a
+  curve-to drops its control points back to a line-to. Move-to and close-path
+  commands are left untouched."
   [content index]
   (let [content (vec content)
         segment (get content index)
@@ -751,9 +767,13 @@
      (case (:command segment)
        :line-to
        (if (some? from)
-         (let [v  (gpt/to-vec from to)
-               h1 (gpt/add from (gpt/scale v (/ 1 3)))
-               h2 (gpt/add from (gpt/scale v (/ 2 3)))]
+         (let [v    (gpt/to-vec from to)
+               ;; Segment rotated 90°, scaled so its length is
+               ;; `curve-toggle-bow` * segment length: bows both handles to the
+               ;; same side into a gentle arc.
+               perp (gpt/scale (gpt/point (- (:y v)) (:x v)) curve-toggle-bow)
+               h1   (-> from (gpt/add (gpt/scale v (/ 1 3))) (gpt/add perp))
+               h2   (-> from (gpt/add (gpt/scale v (/ 2 3))) (gpt/add perp))]
            (update content index helpers/update-curve-to h1 h2))
          content)
 

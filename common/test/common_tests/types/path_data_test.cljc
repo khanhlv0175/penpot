@@ -876,6 +876,25 @@
         (t/is (= 0.0 (get-in seg1 [:params :c1x])))
         (t/is (= 200.0 (get-in seg2 [:params :c2x])))))))
 
+(t/deftest segment-make-curve-point-acute-corner-is-smooth
+  ;; A very acute corner (both legs pointing almost the same way) must become a
+  ;; smooth node: the node's two handles are equal length and opposite (tangent
+  ;; to the corner), not both on the same side as the old chord projection did.
+  (let [content [{:command :move-to :params {:x 10.0 :y 1.0}}
+                 {:command :line-to :params {:x 0.0 :y 0.0}}
+                 {:command :line-to :params {:x 10.0 :y -1.0}}]
+        r       (vec (seq (path/make-curve-point (path/content content)
+                                                 (gpt/point 0.0 0.0))))
+        ;; c2 of the incoming segment and c1 of the outgoing segment are the
+        ;; node's own two handles
+        c2y     (get-in (get r 1) [:params :c2y])
+        c1y     (get-in (get r 2) [:params :c1y])]
+    ;; real handles (not collapsed onto the node)
+    (t/is (not (zero? c2y)))
+    ;; equal length and opposite side (node is their midpoint), so the node is
+    ;; smooth — the bug produced two handles with the same sign
+    (t/is (= c2y (- c1y)))))
+
 (t/deftest helpers-prefix->coords
   (t/is (= [:c1x :c1y] (path.helpers/prefix->coords :c1)))
   (t/is (= [:c2x :c2y] (path.helpers/prefix->coords :c2)))
@@ -1903,9 +1922,10 @@
                [{:command :move-to :params {:x 0.0 :y 0.0}}
                 {:command :line-to :params {:x 90.0 :y 0.0}}])
         curve (path/toggle-segment-curve line 1)]
-    ;; line -> curve: default handles a third of the way from each endpoint
+    ;; line -> curve: handles a third of the way from each endpoint, offset
+    ;; perpendicular (0.25 * length) so the curve is visibly bowed
     (t/is (= [[:move-to {:x 0.0 :y 0.0}]
-              [:curve-to {:x 90.0 :y 0.0 :c1x 30.0 :c1y 0.0 :c2x 60.0 :c2y 0.0}]]
+              [:curve-to {:x 90.0 :y 0.0 :c1x 30.0 :c1y 22.5 :c2x 60.0 :c2y 22.5}]]
              (mapv (juxt :command :params) curve)))
     ;; curve -> line: drops the control points
     (t/is (= [[:move-to {:x 0.0 :y 0.0}]

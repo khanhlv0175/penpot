@@ -108,11 +108,13 @@
          (rx/map to-pixel-snap)
          (rx/with-latest-from (snap-toggled-stream))
          (rx/map check-path-snap)
-         (rx/with-latest-from
-           (fn [position shift? alt?]
-             (assoc position :shift? shift? :alt? alt?))
-           ms/mouse-position-shift
-           ms/mouse-position-alt))))
+         ;; Combine with the keyboard modifier streams (not the pointer-derived
+         ;; `mouse-position-*`, which only update on pointer events) so
+         ;; pressing/releasing a modifier mid-drag re-emits immediately: the 15°
+         ;; shift constraint applies live even without moving the pointer.
+         (rx/combine-latest-with ms/keyboard-shift ms/keyboard-alt)
+         (rx/map (fn [[position shift? alt?]]
+                   (assoc position :shift? shift? :alt? alt?))))))
 
 (defn get-angle [node handler opposite]
   (when (and (some? node) (some? handler) (some? opposite))
@@ -160,12 +162,12 @@
     ;; skipped, unlike node moves which go through `to-pixel-snap`.
     (->> ms/mouse-position
          (rx/filter gpt/point?)
-         (rx/with-latest-from
-           (fn [position shift? alt? mod?]
-             (assoc position :shift? shift? :alt? alt? :mod? mod?))
-           ms/mouse-position-shift
-           ms/mouse-position-alt
-           ms/mouse-position-mod)
+         ;; Keyboard modifier streams + `combine-latest` so pressing/releasing
+         ;; ctrl/alt/shift mid-drag re-emits immediately (the matching mode and
+         ;; the 15° constraint apply live, without needing pointer movement).
+         (rx/combine-latest-with ms/keyboard-shift ms/keyboard-alt ms/keyboard-mod)
+         (rx/map (fn [[position shift? alt? mod?]]
+                   (assoc position :shift? shift? :alt? alt? :mod? mod?)))
          (rx/with-latest-from (snap-toggled-stream))
          (rx/map check-path-snap))))
 
@@ -195,8 +197,8 @@
                      (let [snap (snap/get-snap-delta [position] ranges d-pos)]
                        (gpt/add position snap))
                      position)))
-         (rx/with-latest-from
-           (fn [position shift? alt?]
-             (assoc position :shift? shift? :alt? alt?))
-           ms/mouse-position-shift
-           ms/mouse-position-alt))))
+         ;; Keyboard modifier streams + `combine-latest` so the 15° shift
+         ;; constraint on the draw preview applies live on key press/release.
+         (rx/combine-latest-with ms/keyboard-shift ms/keyboard-alt)
+         (rx/map (fn [[position shift? alt?]]
+                   (assoc position :shift? shift? :alt? alt?))))))

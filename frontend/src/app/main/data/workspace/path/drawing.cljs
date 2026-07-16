@@ -589,8 +589,10 @@
   node at the click point and welds the pending segment onto it (starting the
   next segment there when nothing is pending); a drag then shapes the new
   node's handles. The platform modifier toggles the segment straight/curved on
-  click and bends it on drag; alt (with or without mod) removes the segment.
-  The mod/alt operations never touch the line in progress."
+  click and bends it on drag; alt (with or without mod) removes the segment,
+  also clearing the pending start when the line in progress hangs from that
+  segment (its origin is one of the segment's endpoints). The other mod/alt
+  operations never touch the line in progress."
   [index alt? mod?]
   (ptk/reify ::on-draw-segment-pointer-down
     ptk/WatchEvent
@@ -602,7 +604,16 @@
             last-point (dm/get-in state [:workspace-local :edit-path id :last-point])]
         (cond
           alt?
-          (rx/of (tools/remove-segment index))
+          (let [entry         (d/seek #(= index (:index %)) (helpers/segment-entries content))
+                pending-here? (and (some? last-point)
+                                   (some? entry)
+                                   (or (= last-point (:from entry))
+                                       (= last-point (:to entry))))]
+            (rx/concat
+             (rx/of (tools/remove-segment index))
+             (if pending-here?
+               (rx/of (common/cancel-pending-segment))
+               (rx/empty))))
 
           mod?
           (let [entry     (d/seek #(= index (:index %)) (helpers/segment-entries content))

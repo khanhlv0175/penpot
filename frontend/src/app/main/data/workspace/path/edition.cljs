@@ -388,10 +388,10 @@
 (defn start-move-path-point
   "Node pointer-down dispatcher (move mode). The action is decided from the
   modifiers captured on the DOM event: a plain/shift gesture selects on click
-  and drags the selection; alt selects on click and duplicates the selection
-  on drag; the platform modifier toggles corner/curve on click and reshapes
-  the node's curve on drag; mod+alt removes the node (healing the gap) on
-  click and does nothing on drag."
+  and drags the selection; alt removes the node (healing the gap) on click and
+  duplicates the selection on drag; the platform modifier toggles corner/curve
+  on click and reshapes the node's curve on drag; mod+alt removes the node and
+  its surrounding segments (no heal) on click and does nothing on drag."
   [index shift? alt? mod?]
   (ptk/reify ::start-move-path-point
     ptk/WatchEvent
@@ -409,7 +409,7 @@
           (streams/drag-stream
            (rx/empty)
            (if (some? position)
-             (rx/of (tools/remove-node position))
+             (rx/of (tools/remove-node-with-segments index))
              (rx/empty)))
 
           mod?
@@ -424,7 +424,9 @@
             (set-drag-cursor "move-copy")
             (when-not selected? (selection/select-node index false))
             (duplicate-and-drag @ms/mouse-position))
-           (rx/of (selection/select-node index false)))
+           (if (some? position)
+             (rx/of (tools/remove-node position))
+             (rx/of (selection/select-node index false))))
 
           :else
           (streams/drag-stream
@@ -469,10 +471,10 @@
   "Segment pointer-down dispatcher (move mode). The action is decided from
   the modifiers captured on the DOM event: a plain click selects the segment
   (near its visual middle it inserts a node instead) and a plain/shift drag
-  translates the selection; the platform modifier inserts a node anywhere on
-  click and bends the segment on drag; alt selects on click and duplicates the
-  selection on drag; mod+alt removes the segment on click and does nothing on
-  drag."
+  translates the selection; the platform modifier curves the segment on click
+  (line<->curve) and bends it on drag; alt inserts a node anywhere on click and
+  duplicates the selection on drag; mod+alt removes the segment on click and
+  does nothing on drag."
   [index shift? alt? mod?]
   (ptk/reify ::start-move-path-segment
     ptk/WatchEvent
@@ -493,26 +495,26 @@
            (rx/of (tools/remove-segment index)))
 
           mod?
-          (let [entry        (d/seek #(= index (:index %)) (helpers/segment-entries content))
-                bend?        (and (some? entry)
-                                  (not= :close-path (:command (:segment entry))))
-                insert-point (helpers/insertion-point content position threshold true)]
+          (let [entry (d/seek #(= index (:index %)) (helpers/segment-entries content))
+                bend? (and (some? entry)
+                           (not= :close-path (:command (:segment entry))))]
             (streams/drag-stream
              (rx/of (set-drag-cursor "move-curve")
                     (if bend?
                       (bend-selected-segment index position)
                       (drag-selected-segments position)))
-             (if (some? insert-point)
-               (rx/of (create-node-at-position (meta insert-point)))
-               (rx/empty))))
+             (rx/of (tools/toggle-segment-curve index))))
 
           alt?
-          (streams/drag-stream
-           (rx/of
-            (set-drag-cursor "move-copy")
-            (when-not selected? (selection/select-segment index false))
-            (duplicate-and-drag position))
-           (rx/of (selection/select-segment index false)))
+          (let [insert-point (helpers/insertion-point content position threshold true)]
+            (streams/drag-stream
+             (rx/of
+              (set-drag-cursor "move-copy")
+              (when-not selected? (selection/select-segment index false))
+              (duplicate-and-drag position))
+             (if (some? insert-point)
+               (rx/of (create-node-at-position (meta insert-point)))
+               (rx/of (selection/select-segment index false)))))
 
           :else
           (let [insert-point (when-not shift?
@@ -599,35 +601,52 @@
          (rx/of (apply-content-modifiers)))))))
 
 (defn- curve-config-modifier
-  "Sets the content-modifiers that give a node symmetric handles: the outgoing
-  handle (`:c1` of `out-index`) lands on `position` and the incoming handle
-  (`:c2` of `in-index`) mirrors it across the node."
-  [node in-index in-base out-index out-base position]
+  "Sets the content-modifiers that pull the node's Bézier handles out from a
+  ctrl+drag, keeping the node smooth. With both an incoming and an outgoing
+  segment the handles are mirrored (equal length, opposite direction) and
+  oriented from the drag: the handle on the side the drag points toward follows
+  the pointer and the other mirrors it, so each handle stays on its own
+  segment's side and the curve never loops — whichever way the drag goes. An
+  endpoint's single handle just follows the pointer."
+  [node in-index in-base in-neighbour out-index out-base out-neighbour position]
   (ptk/reify ::curve-config-modifier
     ptk/UpdateEvent
     (update [_ state]
       (let [id        (st/get-path-id state)
             v         (gpt/to-vec node position)
+            both?     (and (some? in-index) (some? out-index))
+
+            ;; Reference direction from the incoming leg toward the outgoing leg
+            ;; (the smooth tangent, using unit legs). The sign of the drag's
+            ;; component along it decides which side follows the pointer, so the
+            ;; outgoing handle stays on the outgoing side and vice versa.
+            ref       (when (and (some? in-neighbour) (some? out-neighbour))
+                        (gpt/subtract (gpt/unit (gpt/to-vec node out-neighbour))
+                                      (gpt/unit (gpt/to-vec node in-neighbour))))
+            s         (if (and both? (some? ref) (neg? (gpt/dot v ref))) -1 1)
+
+            out-handle (if both? (gpt/add node (gpt/scale v s)) (gpt/add node v))
+            in-handle  (if both? (gpt/subtract node (gpt/scale v s)) (gpt/add node v))
+
             modifiers (dm/get-in state [:workspace-local :edit-path id :content-modifiers] {})
             modifiers (cond-> modifiers
                         (some? in-index)
                         (assoc in-index
-                               (let [target (gpt/subtract node v)]
-                                 {:c2x (- (:x target) (:x in-base))
-                                  :c2y (- (:y target) (:y in-base))}))
+                               {:c2x (- (:x in-handle) (:x in-base))
+                                :c2y (- (:y in-handle) (:y in-base))})
 
                         (some? out-index)
                         (assoc out-index
-                               (let [target (gpt/add node v)]
-                                 {:c1x (- (:x target) (:x out-base))
-                                  :c1y (- (:y target) (:y out-base))})))]
+                               {:c1x (- (:x out-handle) (:x out-base))
+                                :c1y (- (:y out-handle) (:y out-base))}))]
         (assoc-in state [:workspace-local :edit-path id :content-modifiers] modifiers)))))
 
 (defn curve-config-node-drag
-  "Mod+drag on a node: reshapes its curve as if the node were being created
-  for the first time — mirrored equal handles following the pointer (the
-  outgoing handle tracks the cursor, the incoming one mirrors it across the
-  node). Any existing handles of the node are replaced."
+  "Mod+drag on a node: reshapes its curve as if the node were being created for
+  the first time — mirrored equal handles following the pointer, oriented from
+  the drag direction so each handle stays on its own segment's side and the
+  curve stays smooth whichever way the drag goes (see `curve-config-modifier`).
+  Any existing handles of the node are replaced."
   [index]
   (ptk/reify ::curve-config-node-drag
     ptk/WatchEvent
@@ -651,6 +670,10 @@
                        (if (= :curve-to (:command out-cmd))
                          (path/get-handler out-cmd :c1)
                          node))
+            ;; neighbour nodes of each leg, used to keep the handles on the
+            ;; correct side of the corner
+            in-neighbour  (when in? (helpers/node-position content (dec index)))
+            out-neighbour (when out? (helpers/node-position content (inc index)))
             stopper  (rx/merge
                       (mse/drag-stopper stream)
                       (->> stream
@@ -659,10 +682,11 @@
           (rx/concat
            (->> ms/mouse-position
                 (rx/filter gpt/point?)
-                (rx/with-latest-from
-                  (fn [position shift?]
-                    (assoc position :shift? shift?))
-                  ms/mouse-position-shift)
+                ;; Keyboard shift + `combine-latest` so the 15° constraint
+                ;; applies live on key press/release, without pointer movement.
+                (rx/combine-latest-with ms/keyboard-shift)
+                (rx/map (fn [[position shift?]]
+                          (assoc position :shift? shift?)))
                 (rx/map
                  (fn [{:keys [x y shift?]}]
                    (let [position (cond-> (gpt/point x y)
@@ -670,8 +694,10 @@
                      (curve-config-modifier node
                                             (when in? index)
                                             in-base
+                                            in-neighbour
                                             (when out? (inc index))
                                             out-base
+                                            out-neighbour
                                             position))))
                 (rx/take-until stopper))
            (rx/of (apply-content-modifiers)))

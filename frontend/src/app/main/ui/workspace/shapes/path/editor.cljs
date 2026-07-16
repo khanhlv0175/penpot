@@ -57,7 +57,7 @@
     (cond
       (and ^boolean mod? ^boolean alt?) "draw-remove"
       ^boolean mod?                     "move-handles"
-      ^boolean alt?                     "move-copy"
+      ^boolean alt?                     "draw-remove"
       (and ^boolean shift?
            ^boolean any-node-selected?) "move-add"
       ^boolean is-selected              "move-move"
@@ -73,7 +73,7 @@
     (cond
       (and ^boolean mod? ^boolean alt?) "draw-remove"
       ^boolean mod?                     "move-curve"
-      ^boolean alt?                     "move-copy"
+      ^boolean alt?                     "draw-add"
       ^boolean shift?                   "move-add"
       ^boolean insert-preview?          "draw-add"
       ^boolean is-selected              "move-move"
@@ -473,10 +473,10 @@
                            :alt?   (boolean alt?)})))
 
     ;; In move mode, preview the node that a click would insert: only near a
-    ;; segment's exact middle by default, or anywhere on the path while the
-    ;; platform modifier is held. When a click there would only select or
-    ;; remove (shift / alt held), no preview. Keyed on the live modifiers so
-    ;; pressing/releasing them updates the preview without moving the pointer.
+    ;; segment's exact middle by default, or anywhere on the path while alt is
+    ;; held. When a click there would curve/select/remove (mod / shift held), no
+    ;; preview. Keyed on the live modifiers so pressing/releasing them updates
+    ;; the preview without moving the pointer.
     (hooks/use-stream
      (mf/with-memo []
        (rx/combine-latest ms/mouse-position ms/keyboard-mod ms/keyboard-shift ms/keyboard-alt))
@@ -484,13 +484,13 @@
      (fn [[position mod? shift? alt?]]
        (if (and ^boolean move-mode?
                 (not shift?)
-                (not alt?)
+                (not mod?)
                 (gpt/point? position))
          (reset! hover-point
                  (dwp.helpers/insertion-point
                   base-content position
                   (/ dwp.helpers/segment-insert-threshold zoom)
-                  (boolean mod?)))
+                  (boolean alt?)))
          (reset! hover-point nil))))
 
     [:g.path-editor {:ref editor-ref}

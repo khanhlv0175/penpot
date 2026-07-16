@@ -967,8 +967,9 @@
         state''   (ptk/update (path.tools/toggle-segment-curve 1) state')
         content'' (get-in state'' [:workspace-drawing :object :content])]
     (t/is (= :curve-to (:command (nth content' 1))))
-    (t/is (= (gpt/point 10 0) (path/get-handler-point content' 1 :c1)))
-    (t/is (= (gpt/point 20 0) (path/get-handler-point content' 1 :c2)))
+    ;; handles a third along, offset perpendicular (0.25 * length) into a bow
+    (t/is (= (gpt/point 10 7.5) (path/get-handler-point content' 1 :c1)))
+    (t/is (= (gpt/point 20 7.5) (path/get-handler-point content' 1 :c2)))
     (t/is (= :line-to (:command (nth content'' 1))))))
 
 (t/deftest remove-segment-opens-the-path-keeping-nodes
