@@ -28,6 +28,7 @@
    [app.main.data.workspace.path.tools :as path.tools]
    [app.main.data.workspace.path.undo :as path.undo]
    [app.main.store :as st]
+   [app.main.streams :as ms]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.state :as ths]
@@ -801,9 +802,15 @@
                                          :handlers #{}})
         sub      [{:command :move-to :params {:x 30 :y 30}}
                   {:command :line-to :params {:x 40 :y 30}}]
+        ;; the pasted fragment is dropped centred at the pointer (its bbox
+        ;; centre (35,30) lands on (100,100))
+        _        (rx/push! ms/mouse-position (gpt/point 100 100))
         state'   (ptk/update (path.clipboard/paste-content sub) state)
-        content' (get-in state' [:workspace-drawing :object :content])]
-    (t/is (= (into (vec content) sub) (vec content')))
+        content' (vec (get-in state' [:workspace-drawing :object :content]))
+        pasted   (subvec content' 3)]
+    (t/is (= (vec content) (subvec content' 0 3)))
+    (t/is (= {:x 95 :y 100} (select-keys (:params (first pasted)) [:x :y])))
+    (t/is (= {:x 105 :y 100} (select-keys (:params (second pasted)) [:x :y])))
     (t/is (= {:nodes #{3 4}
               :segments #{}
               :handlers #{}}
@@ -818,6 +825,9 @@
                   {:command :curve-to :params {:c1x 2 :c1y 0
                                                :c2x 8 :c2y 0
                                                :x 10 :y 0}}]
+        ;; pointer at the fragment's own centre → it lands back on the existing
+        ;; nodes and must be nudged off them by the collision offset
+        _        (rx/push! ms/mouse-position (gpt/point 5 0))
         state'   (ptk/update (path.clipboard/paste-content sub) state)
         content' (vec (get-in state' [:workspace-drawing :object :content]))
         pasted   (subvec content' 3)]
@@ -1116,3 +1126,49 @@
            ;; removing a node leaves fewer nodes than the converted rect had
            (t/is (< (count (path/get-points (:content stored))) orig-nodes))
            (t/is (nil? (get-in new-state [:workspace-drawing :object])))))))))
+
+(defn- page-paths
+  [state]
+  (->> (:objects (cthf/current-page (ths/get-file-from-state state)))
+       vals
+       (filter #(= :path (:type %)))))
+
+(t/deftest pasting-path-nodes-outside-editor-creates-a-new-path-shape
+  (t/async
+    done
+    (let [file    (setup-rect-file)
+          store   (ths/setup-store file)
+          content (path/content [{:command :move-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 40}}])
+          target  (gpt/point 300 300)]
+      ;; a new path shape is centred at the pointer position
+      (rx/push! ms/mouse-position target)
+      (ths/run-store
+       store done
+       [(path.clipboard/paste-nodes-as-shape content)]
+       (fn [new-state]
+         (let [paths  (page-paths new-state)
+               pasted (first paths)]
+           (t/is (= 1 (count paths)))
+           (when pasted
+             (t/is (= target (grc/rect->center (:selrect pasted))))
+             (t/is (contains? (get-in new-state [:workspace-local :selected]) (:id pasted))))))))))
+
+(t/deftest pasting-path-nodes-while-editing-does-not-create-a-shape
+  (t/async
+    done
+    (let [file    (setup-rect-file)
+          id      (:id (cths/get-shape file :rect1))
+          store   (ths/setup-store file)
+          content (path/content [{:command :move-to :params {:x 0 :y 0}}
+                                 {:command :line-to :params {:x 40 :y 0}}])
+          ;; while a path is being edited the editor paste splices instead, so
+          ;; the outside-editor new-shape paste must be a no-op
+          events  (conj (start-path-edition-events id)
+                        (path.clipboard/paste-nodes-as-shape content))]
+      (rx/push! ms/mouse-position (gpt/point 300 300))
+      (ths/run-store
+       store done events
+       (fn [new-state]
+         (t/is (empty? (page-paths new-state))))))))

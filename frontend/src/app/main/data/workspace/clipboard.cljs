@@ -39,6 +39,7 @@
    [app.main.data.notifications :as ntf]
    [app.main.data.persistence :as dps]
    [app.main.data.workspace.media :as dwm]
+   [app.main.data.workspace.path.clipboard :as path-cp]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.texts :as dwtxt]
@@ -293,6 +294,10 @@
                 (case (:type pdata)
                   :copied-props  (rx/of (paste-transit-props pdata))
                   :copied-shapes (rx/of (paste-transit-shapes pdata))
+                  ;; Copied path nodes/segments pasted outside a path editor
+                  ;; become a new path shape (a no-op while editing a path,
+                  ;; where the path-editor paste splices them in instead).
+                  :copied-path-content (rx/of (path-cp/paste-nodes-as-shape (:content pdata)))
                   (rx/empty)))))
 
         :else

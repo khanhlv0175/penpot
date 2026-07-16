@@ -1105,12 +1105,12 @@ for features 1–3, 8, 10, and 11 is complete.
   feature 33's node-duplication geometry (Ctrl+D included). **The per-cell cursor
   mapping is now also implemented (2026-07-15, user-provided spec — see §15).** Still
   open: the **live by-hand pass** over the whole matrix + cursors.
-- **New batch requested 2026-07-15 (features 35–41, see §16):** **35–39 NOT yet
+- **New batch requested 2026-07-15 (features 35–41, see §16):** **35–38 NOT yet
   implemented** — mid-segment node creation must beat pixel-grid snap at high zoom (35);
   `Ctrl+A` select-all-nodes (36); `Shift+Delete` = remove node + adjacent segments / open
   path (37, reuses `remove-node-with-segments`); selected nodes recoloured to the segment
-  pink (38); paste path nodes **outside** the editor → new path shape, and into another
-  open path editor (39). **40 DONE** (top-bar refactor: fixed 480px width, separators,
+  pink (38). **39 DONE 2026-07-16** (paste path nodes outside the editor → new path shape;
+  cross-editor splice already worked). **40 DONE** (top-bar refactor: fixed 480px width, separators,
   add/remove-node buttons removed, unavailable node-op icons hidden not disabled). **41
   DONE** (handler-behavior split button + popover — mirror/aligned/independent — with
   ephemeral per-node type; geometry REPL-verified; placeholder icons + live pass owed).
@@ -1897,7 +1897,38 @@ a shared `selected-color` (or add `selected-node-color` = same pink) and use it 
 says nodes — keep handlers as-is unless it looks inconsistent). Trivial + purely visual;
 verify live that hover (still `accent-color`) and selected (pink) are distinguishable.
 
-### Feature 39 — paste path nodes **outside** the editor (new shape) and into **another** path editor
+### Feature 39 — paste path nodes **outside** the editor (new shape) and into **another** path editor — DONE 2026-07-16
+
+**Implemented.** (a) New `data/workspace/path/clipboard.cljs` `paste-nodes-as-shape [sub-content]`:
+centres the fragment at the pointer (`ms/mouse-position`, else `dsh/get-viewport-center`) by
+`path/move-content` (delta = target − `grc/rect->center` of `path/calc-selrect`), then
+`dwsh/create-and-add-shape :path` with the moved content (passes `:x/:y/:width/:height` so it
+doesn't fall back to the viewport centre; `setup-path` derives geometry from the content, and
+`check-shape` tolerates the extra x/y — JVM-verified). It **self-guards**: a no-op while a path
+is being edited (`st/get-path-id` + `:edit-path` present), because the editor paste splices
+instead. Wired in `data/workspace/clipboard.cljs` `create-paste-from-blob`'s transit `case`:
+new `:copied-path-content` branch → `(path-cp/paste-nodes-as-shape (:content pdata))` (requires
+`path.clipboard`; acyclic — path.* don't require the generic clipboard). Routing has no
+double-paste: the global `:paste` (Ctrl+V) shortcut is `:disabled`/no-op, so outside a path editor
+only the DOM paste event fires → one new shape; while editing, the path `:paste` shortcut
+(`paste-nodes`) splices AND the DOM event fires but the guard makes the new-shape path a no-op.
+(b) **Cross-editor splice** — `paste-nodes`/`paste-content` target the *currently* edited path
+(`st/get-path-id`), so pasting into a different open editor splices in. **Paste-at-pointer added
+2026-07-16:** `paste-content` now centres the fragment on `@ms/mouse-position` (shared
+`center-content-at` helper, before the collision offset) instead of dropping it at the copied
+world coords — applies to any editor including the original path (the old +10/+10 in-place
+behaviour is gone; the collision offset still nudges an exact overlap). `center-content-at`
+computes the centre from the exact node min/max (NOT `points->rect`/`calc-selrect`, which pad a
+degenerate axis by 0.01 → half-pixel drift that also defeats the exact-position collision check —
+caught by the tests). New shape is dropped **selected**, no auto-edit (the default suggestion).
+Tests
+`pasting-path-nodes-outside-editor-creates-a-new-path-shape` (centred at pointer + selected) and
+`pasting-path-nodes-while-editing-does-not-create-a-shape` (guard), plus updated
+`paste-content` position tests; focused suite 56/152, 0
+failures; `clj-kondo` 0/0, `cljfmt` clean, build `:ok`. **Owed:** live by-hand pass (copy nodes
+in one editor, paste on empty canvas → new selected path; paste into another editor → splice).
+
+Original analysis, for reference:
 
 **Requirement:** copied nodes/segments (feature 2) can currently only be pasted inside
 the same path edition. Wanted: (a) pasting **outside** any path editor creates a **new

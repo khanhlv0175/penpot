@@ -10,11 +10,14 @@
    [app.common.geom.point :as gpt]
    [app.common.transit :as t]
    [app.common.types.path :as path]
+   [app.main.data.helpers :as dsh]
    [app.main.data.workspace.path.common :as common]
    [app.main.data.workspace.path.drawing :as drawing]
    [app.main.data.workspace.path.edition :as edition]
    [app.main.data.workspace.path.helpers :as helpers]
    [app.main.data.workspace.path.state :as st]
+   [app.main.data.workspace.shapes :as dwsh]
+   [app.main.streams :as ms]
    [app.util.clipboard :as clipboard]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -48,6 +51,19 @@
 
 (def ^:private paste-offset (gpt/point 10 10))
 
+(defn- center-content-at
+  "Translate `sub-content` so the bounding box of its nodes is centred on
+  `target`. The centre is computed from the exact node min/max — `points->rect`
+  and `calc-selrect` pad a degenerate axis by 0.01, which would drift the centre
+  by half that and defeat the exact-position collision offset below."
+  [sub-content target]
+  (let [pts    (path/get-points sub-content)
+        xs     (map :x pts)
+        ys     (map :y pts)
+        center (gpt/point (/ (+ (reduce min xs) (reduce max xs)) 2)
+                          (/ (+ (reduce min ys) (reduce max ys)) 2))]
+    (path/move-content sub-content (gpt/subtract target center))))
+
 (defn- offset-pasted-content
   "The node-moving pipeline matches nodes by position, so a pasted node at
   the exact coordinates of an existing one would drag both. Shift the pasted
@@ -75,6 +91,11 @@
                  (seq sub-content))
           (let [content     (st/get-path state :content)
                 base        (count content)
+                target      (deref ms/mouse-position)
+                ;; drop the pasted fragment at the pointer (centred), not at the
+                ;; world position it was copied from
+                sub-content (cond-> sub-content
+                              (some? target) (center-content-at target))
                 sub-content (offset-pasted-content content sub-content)
                 new-content (path/splice-content content sub-content)
                 pasted      (into #{}
@@ -92,6 +113,36 @@
       ;; Move mode allows dragging the pasted fragment right away
       (when (some? (dm/get-in state [:workspace-local :edition]))
         (rx/of (drawing/change-edit-mode :move))))))
+
+(defn paste-nodes-as-shape
+  "Creates a new path shape from copied path sub-content, centred at the pointer
+  (or the viewport centre), and selects it. Used when pasting copied path nodes
+  **outside** a path editor; while a path is being edited `paste-nodes` splices
+  the fragment into that path instead, so this is a no-op then."
+  [sub-content]
+  (ptk/reify ::paste-nodes-as-shape
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [content  (path/content sub-content)
+            id       (st/get-path-id state)
+            editing? (and (some? id)
+                          (some? (dm/get-in state [:workspace-local :edit-path id])))]
+        (when (and (not editing?) (seq (path/get-points content)))
+          (let [target (or (deref ms/mouse-position)
+                           (dsh/get-viewport-center state))
+                moved  (center-content-at content target)
+                mrect  (path/calc-selrect moved)]
+            (rx/of
+             (dwsh/create-and-add-shape
+              :path (:x target) (:y target)
+              {:content moved
+               ;; a path positions itself from its content, but pass x/y/size so
+               ;; create-and-add-shape does not fall back to the viewport centre
+               :x (:x mrect)
+               :y (:y mrect)
+               :width (:width mrect)
+               :height (:height mrect)
+               :name "Path"}))))))))
 
 (defn paste-nodes
   "Reads the clipboard and, when it holds copied path sub-content, pastes it
