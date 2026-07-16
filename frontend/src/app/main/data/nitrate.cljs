@@ -55,24 +55,34 @@
             (rx/map (fn [connectivity]
                       (modal/show popup-type (merge (or connectivity {}) extra-props)))))))))
 
+(defn build-admin-console-url
+  ([path]
+   (build-admin-console-url cf/public-uri path nil))
+  ([path query-params]
+   (build-admin-console-url cf/public-uri path query-params))
+  ([public-uri path query-params]
+   (dm/str
+    (cond-> (u/join public-uri "admin-console/" path)
+      (seq query-params) (assoc :query (u/map->query-string query-params))))))
+
 (defn go-to-nitrate-ac
   ([]
-   (st/emit! (rt/nav-raw :href "/admin-console/")))
+   (st/emit! (rt/nav-raw :href (build-admin-console-url ""))))
   ([{:keys [organization-id organization-slug]}]
    (if (and organization-id organization-slug)
-     (let [href (dm/str "/admin-console/org/"
+     (let [path (dm/str "org/"
                         (u/percent-encode organization-slug)
                         "/"
                         (u/percent-encode (str organization-id))
-                        "/people/")]
+                        "/people/")
+           href (build-admin-console-url path)]
        (st/emit! (rt/nav-raw :href href)))
-     (st/emit! (rt/nav-raw :href "/admin-console/")))))
+     (st/emit! (rt/nav-raw :href (build-admin-console-url ""))))))
 
 (defn go-to-nitrate-ac-create-org
   [event-origin]
-  (let [href (dom/append-query-param "/admin-console/?action=create-org"
-                                     :origin
-                                     event-origin)]
+  (let [href (build-admin-console-url "" {:action "create-org"
+                                          :origin event-origin})]
     (st/emit! (rt/nav-raw :href href))))
 
 (defn can-send-invitations?
@@ -85,11 +95,12 @@
 
 (def go-to-subscription-url (u/join cf/public-uri "#/settings/subscriptions"))
 
-(def go-to-ac-url "/admin-console/")
+(def go-to-ac-url (build-admin-console-url ""))
 
 (defn go-to-nitrate-billing
   []
-  (let [href (dm/str "/admin-console/licenses/billing?callback=" (js/encodeURIComponent go-to-subscription-url))]
+  (let [href (build-admin-console-url "licenses/billing"
+                                      {:callback go-to-subscription-url})]
     (st/emit! (rt/nav-raw :href href))))
 
 (def nitrate-checkout-error-token "nitrate-checkout-error")
@@ -116,7 +127,7 @@
                 :error_callback error-callback
                 :finish_error_callback finish-error-callback
                 :cancel_callback cancel-callback}
-        href   (dm/str "/admin-console/licenses/start?" (u/map->query-string params))
+        href   (build-admin-console-url "licenses/start" params)
         event  (ev/event {::ev/name "TEMP-start-nitrate-checkout"
                           ::ev/origin event-origin
                           :product "nitrate:enterprise"
