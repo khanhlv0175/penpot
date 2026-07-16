@@ -91,6 +91,7 @@
 .selection-preview-text {
   fill: var(--color-static-white);
   font-size: var(--font-size-s);
+  user-select: text;
 }
 
 .info-labels-bg {
@@ -101,6 +102,7 @@
   fill: var(--color-static-white);
   font-size: px2rem(12);
   text-anchor: start;
+  user-select: text;
 }
 
 .shape-thumbnail-bg {
