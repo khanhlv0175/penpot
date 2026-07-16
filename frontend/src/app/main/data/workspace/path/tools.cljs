@@ -189,6 +189,28 @@
         (when (seq incident)
           (rx/of (remove-segments incident)))))))
 
+(defn delete-selected-with-segments
+  "Shift+Delete: removes the selected node(s) together with every segment
+  incident to them, opening the path (no healing). A node left with no incident
+  segments is dropped, so this deletes the node and its adjacent segments in one
+  step. Segment selections fold in their endpoint nodes."
+  []
+  (ptk/reify ::delete-selected-with-segments
+    ptk/WatchEvent
+    (watch [_ state _]
+      (let [id       (st/get-path-id state)
+            content  (st/get-path state :content)
+            selected (helpers/selected-node-indices
+                      content
+                      (dm/get-in state [:workspace-local :edit-path id :selection]))
+            incident (into #{}
+                           (comp (filter #(or (contains? selected (:to-index %))
+                                              (contains? selected (:from-index %))))
+                                 (map :index))
+                           (helpers/segment-entries content))]
+        (when (seq incident)
+          (rx/of (remove-segments incident)))))))
+
 (defn toggle-segment-curve
   "Toggles the segment at the given index between a straight line and a curve
   with default handles a third of the way from each endpoint."

@@ -449,6 +449,27 @@
     ;; deleting a node removes it (fewer than the original 4 nodes)
     (t/is (< (nodes (run {:nodes #{1} :segments #{} :handlers #{}})) 4))))
 
+(t/deftest delete-selected-with-segments-opens-a-gap-around-the-node
+  (let [id       (random-uuid)
+        content  (path/content
+                  [{:command :move-to :params {:x 0 :y 0}}
+                   {:command :line-to :params {:x 10 :y 0}}
+                   {:command :line-to :params {:x 20 :y 0}}
+                   {:command :line-to :params {:x 30 :y 0}}
+                   {:command :line-to :params {:x 40 :y 0}}])
+        state    (selectable-path-state id content {:nodes #{2} :segments #{} :handlers #{}})
+        events   (atom [])
+        _        (->> (ptk/watch (path.tools/delete-selected-with-segments) state nil)
+                      (rx/subs! #(swap! events conj %)))
+        state'   (ptk/update (first @events) state)
+        content' (get-in state' [:workspace-drawing :object :content])
+        move-tos (->> content' vec (filter #(= :move-to (:command %))) count)
+        nodes    (count (path/get-points content'))]
+    ;; the middle node's two incident segments are dropped: the node disappears
+    ;; and the path opens into two subpaths (a gap, no heal)
+    (t/is (= 4 nodes))
+    (t/is (= 2 move-tos))))
+
 (t/deftest duplicate-selection-content-copies-nodes-and-segments
   (let [content (path/content
                  [{:command :move-to :params {:x 0 :y 0}}

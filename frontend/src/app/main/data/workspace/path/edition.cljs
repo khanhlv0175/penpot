@@ -25,6 +25,7 @@
    [app.render-wasm.svg-fills :as svg-fills]
    [app.util.mouse :as mse]
    [beicon.v2.core :as rx]
+   [beicon.v2.operators :as rxo]
    [potok.v2.core :as ptk]))
 
 (defn- handler-modifier-delta
@@ -760,12 +761,29 @@
 
 (declare drag-selected-handlers)
 
+(defn- handler-drag-mode
+  "Resolves the matching (opposite-handler) mode from the live modifiers of a
+  handler drag. Unlike the other pointer gestures, the handler matching mode is
+  read live per frame so pressing/releasing mod/alt changes it mid-drag; no
+  modifier falls back to `plain-mode` (the node's stored/derived behavior)."
+  [plain-mode mod? alt?]
+  (cond
+    (and mod? alt?) :aligned
+    mod?            :mirror
+    alt?            :independent
+    :else           plain-mode))
+
+(defn- handler-drag-cursor
+  [mod? alt?]
+  (if (or mod? alt?) "move-handles" "move-move"))
+
 (defn start-move-handler
-  "Handler pointer-down dispatcher (both edit modes). The action is decided
-  from the modifiers captured on the DOM event: a plain/shift gesture selects
-  on click and drags with the `:smart` join behavior; mod or alt remove the
-  handler on click and drag with the `:mirror` / `:independent` behavior;
-  mod+alt does nothing on click and drags with the `:aligned` behavior."
+  "Handler pointer-down dispatcher (both edit modes). The click action is
+  decided from the modifiers captured on the DOM event: a plain/shift gesture
+  selects, mod or alt remove the handler, mod+alt does nothing. The drag
+  matching mode (what happens to the opposite handler) is instead evaluated
+  live during the drag from the current mod/alt (see `drag-selected-handlers`),
+  so it can be changed while dragging; `plain-mode` is the no-modifier fallback."
   [index prefix shift? alt? mod?]
   (ptk/reify ::start-move-handler
     ptk/WatchEvent
@@ -797,27 +815,31 @@
         (cond
           (and mod? alt?)
           (streams/drag-stream
-           (rx/of (set-drag-cursor "move-handles")
-                  (drag-selected-handlers handler-id :aligned))
+           (rx/of (set-drag-cursor (handler-drag-cursor mod? alt?))
+                  (drag-selected-handlers handler-id plain-mode))
            (rx/empty))
 
           (or mod? alt?)
           (streams/drag-stream
-           (rx/of (set-drag-cursor "move-handles")
-                  (drag-selected-handlers handler-id (if mod? :mirror :independent)))
+           (rx/of (set-drag-cursor (handler-drag-cursor mod? alt?))
+                  (drag-selected-handlers handler-id plain-mode))
            (rx/of (tools/remove-handler index prefix)))
 
           :else
           (streams/drag-stream
            (rx/of
-            (set-drag-cursor "move-move")
+            (set-drag-cursor (handler-drag-cursor mod? alt?))
             (when-not selected?
               (selection/select-handler index prefix shift?))
             (drag-selected-handlers handler-id plain-mode))
            (rx/of (selection/select-handler index prefix shift?))))))))
 
 (defn drag-selected-handlers
-  [[index prefix :as primary] mode]
+  "Drags the grabbed handler. The matching mode is resolved live per frame from
+  the current mod/alt via `handler-drag-mode` (falling back to `plain-mode`), so
+  the opposite-handler behavior — and the drag cursor — can be changed while
+  dragging by pressing/releasing the modifiers."
+  [[index prefix :as primary] plain-mode]
   (ptk/reify ::drag-selected-handlers
     ptk/WatchEvent
     (watch [_ state stream]
@@ -840,21 +862,34 @@
             stopper         (rx/merge
                              (mse/drag-stopper stream)
                              (->> stream
-                                  (rx/filter streams/finish-edition?)))]
+                                  (rx/filter streams/finish-edition?)))
+
+            handler-events  (rx/share
+                             (streams/move-handler-stream handler point handler opposite points))]
         (rx/concat
-         (->> (streams/move-handler-stream handler point handler opposite points)
-              (rx/map
-               (fn [{:keys [x y shift?]}]
-                 (let [position (cond-> (gpt/point x y)
-                                  shift? (path.helpers/position-fixed-angle point))
-                       delta    (gpt/subtract position handler)]
-                   (modify-selected-handlers id
-                                             primary
-                                             start-modifiers
-                                             (:x delta)
-                                             (:y delta)
-                                             mode))))
-              (rx/take-until stopper))
+         (rx/merge
+          (->> handler-events
+               (rx/map
+                (fn [{:keys [x y shift? alt? mod?]}]
+                  (let [position (cond-> (gpt/point x y)
+                                   shift? (path.helpers/position-fixed-angle point))
+                        delta    (gpt/subtract position handler)
+                        mode     (handler-drag-mode plain-mode mod? alt?)]
+                    (modify-selected-handlers id
+                                              primary
+                                              start-modifiers
+                                              (:x delta)
+                                              (:y delta)
+                                              mode))))
+               (rx/take-until stopper))
+          ;; Reflect the live matching mode in the drag cursor, emitting only on
+          ;; an actual change so `set-drag-cursor`'s self-clearing watch is not
+          ;; re-subscribed on every pointer move.
+          (->> handler-events
+               (rx/map (fn [{:keys [alt? mod?]}] (handler-drag-cursor mod? alt?)))
+               (rx/pipe (rxo/distinct-contiguous))
+               (rx/map set-drag-cursor)
+               (rx/take-until stopper)))
          (rx/of (apply-content-modifiers)))))))
 
 (declare stop-path-edit)

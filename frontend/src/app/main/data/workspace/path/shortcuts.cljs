@@ -70,6 +70,11 @@
                      :subsections [:path-editor]
                      :fn #(st/emit! (drp/delete-selected))}
 
+   :delete-node-and-segments {:tooltip (ds/shift (ds/supr))
+                              :command ["shift+del" "shift+backspace"]
+                              :subsections [:path-editor]
+                              :fn #(st/emit! (drp/delete-selected-with-segments))}
+
    :merge-nodes     {:tooltip (ds/meta "J")
                      :command (ds/c-mod "j")
                      :subsections [:path-editor]

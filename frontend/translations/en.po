@@ -5254,6 +5254,10 @@ msgid "shortcuts.delete-node"
 msgstr "Delete node"
 
 #: src/app/main/ui/workspace/sidebar/shortcuts.cljs:103
+msgid "shortcuts.delete-node-and-segments"
+msgstr "Delete node and segments"
+
+#: src/app/main/ui/workspace/sidebar/shortcuts.cljs:103
 msgid "shortcuts.deselect-all"
 msgstr "Deselect all"
 

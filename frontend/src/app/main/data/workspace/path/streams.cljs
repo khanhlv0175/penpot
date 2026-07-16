@@ -161,10 +161,11 @@
     (->> ms/mouse-position
          (rx/filter gpt/point?)
          (rx/with-latest-from
-           (fn [position shift? alt?]
-             (assoc position :shift? shift? :alt? alt?))
+           (fn [position shift? alt? mod?]
+             (assoc position :shift? shift? :alt? alt? :mod? mod?))
            ms/mouse-position-shift
-           ms/mouse-position-alt)
+           ms/mouse-position-alt
+           ms/mouse-position-mod)
          (rx/with-latest-from (snap-toggled-stream))
          (rx/map check-path-snap))))
 
