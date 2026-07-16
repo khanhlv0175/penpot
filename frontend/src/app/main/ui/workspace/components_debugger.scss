@@ -4,12 +4,14 @@
 //
 // Copyright (c) KALEIDOS INC Sucursal en España SL
 
+@use "ds/_utils.scss" as *;
+
 .wrapper {
   position: fixed;
   padding: var(--sp-s);
   border-radius: var(--sp-m);
   border: var(--sp-xxs) solid var(--color-background-quaternary);
-  box-shadow: 0 0 var(--sp-s) 0 rgb(0 0 0 / 30%);
+  box-shadow: 0 0 var(--sp-s) 0 rgb(0 0 0 / 0.3);
   overflow: hidden;
   min-inline-size: 25px;
   min-block-size: 200px;
@@ -20,7 +22,6 @@
   background-color: var(--panel-background-color);
   color: var(--color-foreground-secondary);
   z-index: var(--z-index-set);
-
 }
 
 .inner {
@@ -63,12 +64,12 @@
 
 .canvas-svg {
   display: block;
-  block-size: 100%;
+  min-block-size: 100%;
   min-inline-size: 100%;
 }
 
 .selection-preview-box {
-  fill: black;
+  fill: var(--color-static-black);
   stroke: var(--color-background-quaternary);
   stroke-width: 2;
 
@@ -79,6 +80,7 @@
 
 .selection-preview-icon {
   --icon-stroke-color: var(--color-foreground-secondary);
+
   display: block;
 
   &.component {
@@ -97,8 +99,82 @@
 
 .info-text {
   fill: var(--color-static-white);
-  font-size: 12px;
-  text-anchor: end;
+  font-size: px2rem(12);
+  text-anchor: start;
+}
+
+.shape-thumbnail-bg {
+  fill: var(--color-background-primary);
+  stroke: var(--color-background-quaternary);
+  stroke-width: 1;
+
+  &.is-loading {
+    animation: thumbnail-loading-pulse 1.2s ease-in-out infinite;
+  }
+}
+
+.shape-thumbnail-image {
+  opacity: 0.95;
+}
+
+.shape-thumbnail-loading {
+  fill: var(--color-foreground-secondary);
+  font-size: px2rem(12);
+  pointer-events: none;
+}
+
+@keyframes thumbnail-loading-pulse {
+  0%,
+  100% {
+    fill: var(--color-background-primary);
+  }
+
+  50% {
+    fill: var(--color-background-quaternary);
+  }
+}
+
+.highlight-arrows {
+  pointer-events: none;
+}
+
+.highlight-arrow {
+  stroke: var(--assets-component-hightlight);
+  stroke-width: 2;
+}
+
+.highlight-arrow-marker-circle {
+  fill: var(--assets-component-hightlight);
+}
+
+.highlight-arrow-marker-icon {
+  fill: var(--assets-component-hightlight);
+  stroke: var(--color-static-white);
+  stroke-width: 2;
+}
+
+.swap-arrow {
+  stroke: var(--color-accent-success);
+  stroke-width: 2;
+}
+
+.swap-arrow-marker-circle {
+  fill: var(--color-accent-success);
+}
+
+.swap-arrow-marker-icon {
+  fill: var(--color-accent-success);
+  stroke: var(--color-static-white);
+  stroke-width: 2;
+}
+
+.legend-text {
+  fill: var(--color-static-white);
+  font-size: px2rem(12);
+}
+
+.legend-bg {
+  fill: var(--color-background-quaternary);
 }
 
 ::-webkit-resizer {
