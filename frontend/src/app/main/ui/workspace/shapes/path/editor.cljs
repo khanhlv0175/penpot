@@ -40,7 +40,8 @@
 (def black-color "var(--app-black)")
 (def white-color "var(--app-white)")
 (def gray-color "var(--df-secondary)")
-(def selected-segment-color "#F49EF7")
+;; Pink used for the selected state of both nodes and segments.
+(def selected-color "#F49EF7")
 
 ;; Per-cell hover cursors of the modifier interaction matrix: each returns the
 ;; static cursor name for hovering that element kind given the edit mode and
@@ -145,7 +146,7 @@
                :stroke (cond ^boolean is-active black-color
                              ^boolean is-preview secondary-color
                              :else accent-color)
-               :fill (cond is-selected accent-color
+               :fill (cond is-selected selected-color
                            :else white-color)}}]
      [:circle {:cx x
                :cy y
@@ -290,8 +291,8 @@
                :pointer-events "none"
                :style {:fill "none"
                        :stroke (if ^boolean is-selected
-                                 selected-segment-color
-                                 black-color)
+                                 selected-color
+                                 accent-color)
                        :stroke-width (/ 2 zoom)}}])
      [:path {:d (.toString content)
              :on-pointer-down on-pointer-down
