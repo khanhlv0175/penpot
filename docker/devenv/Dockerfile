@@ -1,4 +1,20 @@
-FROM ubuntu:26.04 AS base
+# =============================================================================
+# Docker Hardened Images (DHI) migration -- Debian 13 (trixie), "-dev" tag
+# =============================================================================
+# The "-dev" tag is kept as the final image on purpose: this is an
+# interactive development container (shell, sudo, tmux, vim...), not a
+# production artifact, so it keeps DHI's patching/SBOM/provenance benefit
+# without breaking the workflow.
+#
+# Full rationale, package-name gotchas, and the PAM/sudo troubleshooting
+# history: see docs/technical-guide/developer/dhi-migration-notes.md
+#
+# Requires: docker login dhi.io (free Docker ID -- DHI is free/Apache 2.0
+# since Dec 2025, no paid subscription needed; see the migration notes doc
+# for details)
+# =============================================================================
+
+FROM dhi.io/debian-base:trixie-debian13-dev AS base
 
 ENV LANG='C.UTF-8' \
     LC_ALL='C.UTF-8' \
@@ -13,6 +29,8 @@ RUN set -ex; \
         rsync \
         wget \
         sudo \
+        libpam-modules \
+        libpam-runtime \
         tmux \
         vim \
         curl \
@@ -24,7 +42,39 @@ RUN set -ex; \
         ca-certificates \
         \
         binutils \
-        build-essential autoconf libtool pkg-config
+        build-essential autoconf libtool pkg-config \
+    ; \
+    mkdir -p /usr/lib/pam.d; \
+    printf '%s\n' \
+        '#%PAM-1.0' \
+        'auth       required   pam_unix.so nullok' \
+        'account    required   pam_unix.so' \
+        'password   required   pam_unix.so' \
+        'session    required   pam_unix.so' \
+        'session    required   pam_limits.so' \
+        | tee /etc/pam.d/sudo /usr/lib/pam.d/sudo > /dev/null; \
+    printf '%s\n' \
+        '#%PAM-1.0' \
+        'auth       required   pam_deny.so' \
+        'account    required   pam_deny.so' \
+        'password   required   pam_deny.so' \
+        'session    required   pam_deny.so' \
+        | tee /etc/pam.d/other /usr/lib/pam.d/other > /dev/null; \
+    if [ ! -s /etc/nsswitch.conf ]; then \
+        printf '%s\n' \
+            'passwd:         files' \
+            'group:          files' \
+            'shadow:         files' \
+            'gshadow:        files' \
+            'hosts:          files dns' \
+            'networks:       files' \
+            'protocols:      files' \
+            'services:       files' \
+            'ethers:         files' \
+            'rpc:            files' \
+            'netgroup:       files' \
+            > /etc/nsswitch.conf; \
+    fi
 
 ################################################################################
 ## NODE SETUP
@@ -373,14 +423,20 @@ RUN set -ex; \
 
 FROM base AS devenv-base
 
+# The DHI dev image runs as root but has no preexisting "ubuntu" user
+# (that's specific to official Ubuntu images) -- "penpot" is created directly.
 RUN set -ex; \
-    usermod -l penpot -d /home/penpot -G users -s /bin/bash ubuntu; \
+    apt-get -qq update; \
+    apt-get -qqy --no-install-recommends install passwd; \
+    groupadd -f users; \
+    useradd -u 1000 -m -d /home/penpot -G users -s /bin/bash penpot; \
     passwd penpot -d; \
     echo "penpot ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 RUN set -ex; \
     apt-get -qq update; \
     apt-get -qq dist-upgrade; \
+    apt-get -qqy --no-install-recommends install init-system-helpers; \
     apt-get -qqy install --no-install-recommends \
       redis-tools \
       gnupg2 \
@@ -414,16 +470,16 @@ RUN set -ex; \
       fonts-freefont-ttf \
       poppler-utils \
       \
-      libasound2t64 \
-      libatk-bridge2.0-0t64 \
-      libatk1.0-0t64 \
-      libatspi2.0-0t64 \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libatspi2.0-0 \
       libcairo2 \
-      libcups2t64 \
+      libcups2 \
       libdbus-1-3 \
       libdrm2 \
       libgbm1 \
-      libglib2.0-0t64 \
+      libglib2.0-0 \
       libnspr4 \
       libnss3 \
       libpango-1.0-0 \
@@ -437,14 +493,14 @@ RUN set -ex; \
       libxrandr2 \
       \
       libpng16-16 \
-      libjpeg-turbo8 \
+      libjpeg62-turbo \
       libtiff6 \
       libwebp7 \
       libopenexr-3-1-30 \
       libfreetype6 \
       libfontconfig1 \
       libglib2.0-0 \
-      libxml2-16 \
+      libxml2 \
       liblcms2-2 \
       libheif1 \
       libopenjp2-7 \
@@ -455,12 +511,16 @@ RUN set -ex; \
       libwebpdemux2 \
       libzip5 \
     ; \
-    rm -rf /var/lib/apt/lists/*;
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /usr/local/bin; \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
+    ln -sf /usr/bin/batcat /usr/local/bin/bat;
 
+# PostgreSQL apt repo: Ubuntu codename "noble" -> Debian codename "trixie".
 RUN set -ex; \
     install -d /usr/share/postgresql-common/pgdg; \
     curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc; \
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" >> /etc/apt/sources.list.d/postgresql.list; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" >> /etc/apt/sources.list.d/postgresql.list; \
     apt-get -qq update; \
     apt-get -qqy install postgresql-client-16; \
     apt-get clean; \
@@ -487,7 +547,9 @@ ENV LANG='C.UTF-8' \
     SERENA_CONTEXT="claude-code" \
     PATH="/opt/jdk/bin:/opt/gh/bin:/opt/utils/bin:/opt/clojure/bin:/opt/node/bin:/opt/imagick/bin:/opt/cargo/bin:$PATH"
 
-COPY --from=penpotapp/imagemagick:7.1.2-24 /opt/imagick /opt/imagick
+# Points at the migrated (Debian-based) ImageMagick image, not the old
+# Ubuntu-built one -- adjust the tag to whatever you pushed it under.
+COPY --from=penpotapp/imagemagick:dhi-trixie /opt/imagick /opt/imagick
 COPY --from=setup-jvm /opt/jdk /opt/jdk
 COPY --from=setup-jvm /opt/clojure /opt/clojure
 COPY --from=setup-node /opt/node /opt/node
@@ -519,3 +581,4 @@ COPY files/init.sh             /home/init.sh
 
 ENTRYPOINT ["/home/entrypoint.sh"]
 CMD ["/home/init.sh"]
+
